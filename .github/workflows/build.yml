@@ -1,0 +1,274 @@
+name: Build VirusDownloader
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Select platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - android
+          - linux
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================
+  # Code Quality & Tests
+  # ============================================
+  analyze-and-test:
+    name: Analyze and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version from commits
+        shell: bash
+        run: |
+          N=$(git rev-list --count HEAD)
+          MAJOR=$((1 + N / 100))
+          MINOR=$(((N / 10) % 10))
+          PATCH=$((N % 10))
+          BUILD_NAME="${MAJOR}.${MINOR}.${PATCH}-beta"
+          echo "BUILD_NAME=${BUILD_NAME}" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=${N}" >> $GITHUB_ENV
+          echo "Building VirusDownloader v${BUILD_NAME} (build ${N})"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'master'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run static analysis
+        run: dart analyze lib/
+
+      - name: Run unit tests
+        run: flutter test
+
+  # ============================================
+  # Windows Build
+  # ============================================
+  build-windows:
+    name: Build Windows
+    needs: [analyze-and-test]
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'windows' }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version from commits
+        shell: bash
+        run: |
+          N=$(git rev-list --count HEAD)
+          MAJOR=$((1 + N / 100))
+          MINOR=$(((N / 10) % 10))
+          PATCH=$((N % 10))
+          BUILD_NAME="${MAJOR}.${MINOR}.${PATCH}-beta"
+          echo "BUILD_NAME=${BUILD_NAME}" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=${N}" >> $GITHUB_ENV
+          echo "Building VirusDownloader v${BUILD_NAME} (build ${N})"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'master'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Compress Windows Build
+        shell: bash
+        run: |
+          7z a -tzip "VirusDownloader-Windows-x64-v${{ env.BUILD_NAME }}.zip" "./build/windows/x64/runner/Release/*"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirusDownloader-Windows-x64
+          path: VirusDownloader-Windows-x64-*.zip
+          retention-days: 14
+
+      - name: Send Windows build to Telegram
+        if: always()
+        shell: bash
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID || '6779570748' }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
+          TRIGGERED_BY: ${{ github.actor }}
+          BUILD_LABEL: "Windows x64"
+          BUILD_NAME: ${{ env.BUILD_NAME }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+        run: |
+          FILE=$(ls VirusDownloader-Windows-*.zip 2>/dev/null | head -1)
+          if [ -z "$FILE" ]; then
+            echo "No Windows build found, skipping Telegram upload."
+            exit 0
+          fi
+          python3 .github/scripts/telegram_upload.py "$FILE"
+
+  # ============================================
+  # Android Build
+  # ============================================
+  build-android:
+    name: Build Android
+    needs: [analyze-and-test]
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version from commits
+        shell: bash
+        run: |
+          N=$(git rev-list --count HEAD)
+          MAJOR=$((1 + N / 100))
+          MINOR=$(((N / 10) % 10))
+          PATCH=$((N % 10))
+          BUILD_NAME="${MAJOR}.${MINOR}.${PATCH}-beta"
+          echo "BUILD_NAME=${BUILD_NAME}" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=${N}" >> $GITHUB_ENV
+          echo "Building VirusDownloader v${BUILD_NAME} (build ${N})"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'master'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        run: flutter build apk --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirusDownloader-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
+
+      - name: Send Android APK to Telegram
+        if: always()
+        shell: bash
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID || '6779570748' }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
+          TRIGGERED_BY: ${{ github.actor }}
+          BUILD_LABEL: "Android APK"
+          BUILD_NAME: ${{ env.BUILD_NAME }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+        run: |
+          FILE=$(ls build/app/outputs/flutter-apk/app-release.apk 2>/dev/null | head -1)
+          if [ -z "$FILE" ]; then
+            echo "No Android APK found, skipping Telegram upload."
+            exit 0
+          fi
+          python3 .github/scripts/telegram_upload.py "$FILE"
+
+  # ============================================
+  # Linux Build
+  # ============================================
+  build-linux:
+    name: Build Linux
+    needs: [analyze-and-test]
+    if: ${{ github.event_name == 'push' || github.event.inputs.platform == 'all' || github.event.inputs.platform == 'linux' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate version from commits
+        shell: bash
+        run: |
+          N=$(git rev-list --count HEAD)
+          MAJOR=$((1 + N / 100))
+          MINOR=$(((N / 10) % 10))
+          PATCH=$((N % 10))
+          BUILD_NAME="${MAJOR}.${MINOR}.${PATCH}-beta"
+          echo "BUILD_NAME=${BUILD_NAME}" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=${N}" >> $GITHUB_ENV
+          echo "Building VirusDownloader v${BUILD_NAME} (build ${N})"
+
+      - name: Install Linux Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'master'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Linux Release
+        run: flutter build linux --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
+
+      - name: Compress Linux Build
+        run: |
+          tar -czvf VirusDownloader-Linux-x64-v${{ env.BUILD_NAME }}.tar.gz -C build/linux/x64/release/bundle .
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VirusDownloader-Linux-x64
+          path: VirusDownloader-Linux-x64-*.tar.gz
+          retention-days: 14
+
+      - name: Send Linux build to Telegram
+        if: always()
+        shell: bash
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID || '6779570748' }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || github.sha }}
+          TRIGGERED_BY: ${{ github.actor }}
+          BUILD_LABEL: "Linux x64"
+          BUILD_NAME: ${{ env.BUILD_NAME }}
+          BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
+        run: |
+          FILE=$(ls VirusDownloader-Linux-*.tar.gz 2>/dev/null | head -1)
+          if [ -z "$FILE" ]; then
+            echo "No Linux build found, skipping Telegram upload."
+            exit 0
+          fi
+          python3 .github/scripts/telegram_upload.py "$FILE"
