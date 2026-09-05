@@ -123,12 +123,18 @@ jobs:
           BUILD_NAME: ${{ env.BUILD_NAME }}
           BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
         run: |
-          FILE=$(ls VirusDownloader-Windows-*.zip 2>/dev/null | head -1)
+          FILE=""
+          for f in VirusDownloader-Windows-*.zip; do
+            if [ -f "$f" ]; then
+              FILE="$f"
+              break
+            fi
+          done
           if [ -z "$FILE" ]; then
             echo "No Windows build found, skipping Telegram upload."
             exit 0
           fi
-          python3 .github/scripts/telegram_upload.py "$FILE"
+          python3 .github/scripts/telegram_upload.py "$FILE" 2>/dev/null || python .github/scripts/telegram_upload.py "$FILE"
 
   # ============================================
   # Android Build
@@ -193,12 +199,12 @@ jobs:
           BUILD_NAME: ${{ env.BUILD_NAME }}
           BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
         run: |
-          FILE=$(ls build/app/outputs/flutter-apk/app-release.apk 2>/dev/null | head -1)
-          if [ -z "$FILE" ]; then
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          if [ ! -f "$APK" ]; then
             echo "No Android APK found, skipping Telegram upload."
             exit 0
           fi
-          python3 .github/scripts/telegram_upload.py "$FILE"
+          python3 .github/scripts/telegram_upload.py "$APK"
 
   # ============================================
   # Linux Build
@@ -266,7 +272,13 @@ jobs:
           BUILD_NAME: ${{ env.BUILD_NAME }}
           BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
         run: |
-          FILE=$(ls VirusDownloader-Linux-*.tar.gz 2>/dev/null | head -1)
+          FILE=""
+          for f in VirusDownloader-Linux-*.tar.gz; do
+            if [ -f "$f" ]; then
+              FILE="$f"
+              break
+            fi
+          done
           if [ -z "$FILE" ]; then
             echo "No Linux build found, skipping Telegram upload."
             exit 0
