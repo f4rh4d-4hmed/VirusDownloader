@@ -8,8 +8,10 @@ import 'app.dart';
 import 'core/constants.dart';
 import 'data/repositories/download_repository.dart';
 import 'data/repositories/settings_repository.dart';
+import 'data/services/browser_integration_service.dart';
 import 'data/services/file_service.dart';
 import 'data/services/http_download_service.dart';
+import 'data/services/integration_server_service.dart';
 import 'data/services/storage_service.dart';
 import 'ui/view_models/downloads_view_model.dart';
 import 'ui/view_models/settings_view_model.dart';
@@ -54,6 +56,14 @@ void main() async {
   );
   await downloadRepository.init();
 
+  // Initialize Browser Integration & Start Local Server
+  final browserIntegrationService = BrowserIntegrationService();
+  final integrationServer = IntegrationServerService(
+    downloadRepository: downloadRepository,
+    fileService: fileService,
+  );
+  await integrationServer.start();
+
   runApp(
     MultiProvider(
       providers: [
@@ -61,6 +71,8 @@ void main() async {
         Provider<StorageService>.value(value: storageService),
         Provider<FileService>.value(value: fileService),
         Provider<HttpDownloadService>.value(value: httpService),
+        Provider<BrowserIntegrationService>.value(value: browserIntegrationService),
+        ChangeNotifierProvider<IntegrationServerService>.value(value: integrationServer),
 
         // Repositories
         ChangeNotifierProvider<DownloadRepository>.value(value: downloadRepository),
@@ -71,7 +83,11 @@ void main() async {
           create: (_) => DownloadsViewModel(repository: downloadRepository),
         ),
         ChangeNotifierProvider<SettingsViewModel>(
-          create: (_) => SettingsViewModel(repository: settingsRepository),
+          create: (_) => SettingsViewModel(
+            repository: settingsRepository,
+            browserService: browserIntegrationService,
+            integrationServer: integrationServer,
+          ),
         ),
       ],
       child: const VirusDownloaderApp(),

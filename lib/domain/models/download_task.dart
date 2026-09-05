@@ -14,6 +14,7 @@ class DownloadTask {
   final DateTime dateAdded;
   final DateTime? dateCompleted;
   final String? errorMessage;
+  final Map<String, String>? headers;
 
   const DownloadTask({
     required this.id,
@@ -28,6 +29,7 @@ class DownloadTask {
     required this.dateAdded,
     this.dateCompleted,
     this.errorMessage,
+    this.headers,
   });
 
   double get progress {
@@ -69,6 +71,7 @@ class DownloadTask {
     DateTime? dateCompleted,
     String? errorMessage,
     bool clearError = false,
+    Map<String, String>? headers,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -83,6 +86,7 @@ class DownloadTask {
       dateAdded: dateAdded ?? this.dateAdded,
       dateCompleted: dateCompleted ?? this.dateCompleted,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      headers: headers ?? this.headers,
     );
   }
 }

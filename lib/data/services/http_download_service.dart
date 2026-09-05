@@ -32,6 +32,7 @@ class HttpDownloadService {
     required CancelToken cancelToken,
     required DownloadProgressCallback onProgress,
     bool allowResume = true,
+    Map<String, String>? headers,
   }) async {
     final file = File(savePath);
     int existingBytes = 0;
@@ -40,9 +41,12 @@ class HttpDownloadService {
       existingBytes = await file.length();
     }
 
-    final headers = <String, dynamic>{};
+    final requestHeaders = <String, dynamic>{};
+    if (headers != null) {
+      requestHeaders.addAll(headers);
+    }
     if (existingBytes > 0) {
-      headers['range'] = 'bytes=$existingBytes-';
+      requestHeaders['range'] = 'bytes=$existingBytes-';
     }
 
     Response<ResponseBody> response;
@@ -51,7 +55,7 @@ class HttpDownloadService {
         url,
         options: Options(
           responseType: ResponseType.stream,
-          headers: headers,
+          headers: requestHeaders,
           validateStatus: (status) => status != null && status >= 200 && status < 400,
         ),
         cancelToken: cancelToken,
@@ -138,11 +142,19 @@ class HttpDownloadService {
   }
 
   /// Probes URL headers to retrieve file name and content length without full download
-  Future<({String? fileName, int totalBytes})> probeUrl(String url) async {
+  Future<({String? fileName, int totalBytes})> probeUrl(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
     try {
+      final reqHeaders = <String, dynamic>{};
+      if (headers != null) {
+        reqHeaders.addAll(headers);
+      }
       final response = await _dio.head(
         url,
         options: Options(
+          headers: reqHeaders,
           validateStatus: (status) => status != null && status >= 200 && status < 400,
         ),
       );

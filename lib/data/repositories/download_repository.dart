@@ -43,6 +43,7 @@ class DownloadRepository extends ChangeNotifier {
     required String fileName,
     required String targetDirectory,
     DownloadCategory? category,
+    Map<String, String>? headers,
   }) async {
     final uniqueSavePath =
         await fileService.generateUniqueFilePath(targetDirectory, fileName);
@@ -59,6 +60,7 @@ class DownloadRepository extends ChangeNotifier {
       category: detectedCategory,
       speedBytesPerSec: 0.0,
       dateAdded: DateTime.now(),
+      headers: headers,
     );
 
     _tasks.insert(0, task);
@@ -225,6 +227,7 @@ class DownloadRepository extends ChangeNotifier {
         url: task.url,
         savePath: task.savePath,
         cancelToken: cancelToken,
+        headers: task.headers,
         onProgress: ({
           required int downloadedBytes,
           required int totalBytes,

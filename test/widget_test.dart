@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:virusdownloader/core/enums.dart';
 import 'package:virusdownloader/core/utils.dart';
+import 'package:virusdownloader/data/models/download_task_model.dart';
 import 'package:virusdownloader/domain/models/download_task.dart';
 
 void main() {
@@ -66,6 +67,53 @@ void main() {
       );
       expect(completed.progress, 1.0);
       expect(completed.eta, isNull);
+    });
+
+    test('Preserves headers across copyWith', () {
+      final task = DownloadTask(
+        id: 'h-1',
+        url: 'https://example.com/vid.mp4',
+        fileName: 'vid.mp4',
+        savePath: '/tmp/vid.mp4',
+        dateAdded: DateTime.now(),
+        headers: const {'Referer': 'https://example.com'},
+      );
+
+      expect(task.headers?['Referer'], 'https://example.com');
+      final updated = task.copyWith(downloadedBytes: 100);
+      expect(updated.headers?['Referer'], 'https://example.com');
+    });
+  });
+
+  group('DownloadTaskModel Serialization Tests', () {
+    test('Serializes and deserializes headers correctly', () {
+      final now = DateTime.now();
+      final task = DownloadTask(
+        id: 'header-task-1',
+        url: 'https://example.com/protected/video.mp4',
+        fileName: 'video.mp4',
+        savePath: '/downloads/video.mp4',
+        totalBytes: 5000,
+        downloadedBytes: 1000,
+        status: DownloadStatus.downloading,
+        dateAdded: now,
+        headers: {
+          'Referer': 'https://example.com/player',
+          'User-Agent': 'CustomUA/1.0',
+          'Cookie': 'auth_token=secret_123',
+        },
+      );
+
+      final json = DownloadTaskModel.toJson(task);
+      expect(json['headers'], isNotNull);
+      expect(json['headers']['Referer'], 'https://example.com/player');
+      expect(json['headers']['Cookie'], 'auth_token=secret_123');
+
+      final deserialized = DownloadTaskModel.fromJson(json);
+      expect(deserialized.id, task.id);
+      expect(deserialized.headers?['Referer'], 'https://example.com/player');
+      expect(deserialized.headers?['User-Agent'], 'CustomUA/1.0');
+      expect(deserialized.headers?['Cookie'], 'auth_token=secret_123');
     });
   });
 }

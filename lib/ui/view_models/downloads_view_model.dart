@@ -139,12 +139,14 @@ class DownloadsViewModel extends ChangeNotifier {
     required String fileName,
     required String targetDirectory,
     DownloadCategory? category,
+    Map<String, String>? headers,
   }) {
     return repository.addTask(
       url: url,
       fileName: fileName,
       targetDirectory: targetDirectory,
       category: category,
+      headers: headers,
     );
   }
 

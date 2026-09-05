@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VirusDownloader Extension Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      padding: 30px;
+      line-height: 1.5;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 18px;
+    }
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+    label.title-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-bottom: 4px;
+    }
+    .hint {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    input[type="text"], input[type="number"], textarea {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 13px;
+      color: #ffffff;
+      outline: none;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus {
+      border-color: #6366f1;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .checkbox-label input {
+      margin-top: 3px;
+      accent-color: #6366f1;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .btn {
+      padding: 9px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: #4f46e5;
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background: #6366f1;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+    .btn-secondary:hover {
+      background: #475569;
+    }
+    .status-msg {
+      font-size: 12.5px;
+      margin-top: 12px;
+      font-weight: 500;
+    }
+    .status-success { color: #34d399; }
+    .status-error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h1>
+    <img src="icons/icon32.png" alt="Logo" width="24" height="24">
+    VirusDownloader Extension Settings
+  </h1>
+  <p class="subtitle">Configure communication with your local VirusDownloader desktop application.</p>
+
+  <div class="card">
+    <div class="form-group">
+      <label class="title-label" for="serverUrl">Integration Server URL</label>
+      <div class="hint">The local HTTP server address exposed by the VirusDownloader desktop client.</div>
+      <input type="text" id="serverUrl" placeholder="http://127.0.0.1:9849">
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="testConnBtn">Test Connection</button>
+      <span class="status-msg" id="testResult"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input type="checkbox" id="interceptDownloads">
+        <div>
+          <span class="title-label">Intercept Browser Downloads</span>
+          <span class="hint">Automatically hand over browser-initiated file downloads to VirusDownloader.</span>
+        </div>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label class="checkbox-label">
+        <input type="checkbox" id="showFloatingButton">
+        <div>
+          <span class="title-label">Show Floating Video Download Button</span>
+          <span class="hint">Display an overlay download badge when hovering over video players on web pages.</span>
+        </div>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label class="title-label" for="minVideoSize">Ignore Media Smaller Than (KB)</label>
+      <div class="hint">Filters out tiny video ads, audio sound effects, and tracking pixels.</div>
+      <input type="number" id="minVideoSize" min="0" placeholder="200">
+    </div>
+
+    <div class="form-group">
+      <label class="title-label" for="ignoredDomains">Ignored Domains (one per line)</label>
+      <div class="hint">Do not sniff media or show floating buttons on these websites.</div>
+      <textarea id="ignoredDomains" rows="3" placeholder="example.com&#10;adserver.com"></textarea>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="saveBtn">Save Settings</button>
+      <span class="status-msg" id="saveResult"></span>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
+

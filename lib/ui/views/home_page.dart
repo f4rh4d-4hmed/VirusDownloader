@@ -70,12 +70,14 @@ class _HomePageState extends State<HomePage> {
           required String fileName,
           required String targetDirectory,
           DownloadCategory? category,
+          Map<String, String>? headers,
         }) {
           downloadsVm.addDownload(
             url: url,
             fileName: fileName,
             targetDirectory: targetDirectory,
             category: category,
+            headers: headers,
           );
         },
       ),

@@ -10,11 +10,16 @@ class AddDownloadDialog extends StatefulWidget {
   final String defaultDirectory;
   final FileService fileService;
   final HttpDownloadService httpService;
+  final String? initialUrl;
+  final String? initialFileName;
+  final Map<String, String>? initialHeaders;
+  final DownloadCategory? initialCategory;
   final Function({
     required String url,
     required String fileName,
     required String targetDirectory,
     DownloadCategory? category,
+    Map<String, String>? headers,
   }) onConfirm;
 
   const AddDownloadDialog({
@@ -23,6 +28,10 @@ class AddDownloadDialog extends StatefulWidget {
     required this.fileService,
     required this.httpService,
     required this.onConfirm,
+    this.initialUrl,
+    this.initialFileName,
+    this.initialHeaders,
+    this.initialCategory,
   });
 
   @override
@@ -33,22 +42,51 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
   final _fileNameController = TextEditingController();
+  final _refererController = TextEditingController();
+  final _customHeadersController = TextEditingController();
   late String _selectedDirectory;
   DownloadCategory _selectedCategory = DownloadCategory.other;
   bool _isProbing = false;
   int _probedSize = 0;
+  bool _showAdvanced = false;
 
   @override
   void initState() {
     super.initState();
     _selectedDirectory = widget.defaultDirectory;
-    _checkClipboard();
+    if (widget.initialCategory != null) {
+      _selectedCategory = widget.initialCategory!;
+    }
+    if (widget.initialUrl != null && widget.initialUrl!.isNotEmpty) {
+      _urlController.text = widget.initialUrl!;
+      _fileNameController.text =
+          widget.initialFileName ?? AppUtils.extractFileName(widget.initialUrl!);
+      _updateCategory(_fileNameController.text);
+    } else {
+      _checkClipboard();
+    }
+
+    if (widget.initialHeaders != null && widget.initialHeaders!.isNotEmpty) {
+      final copy = Map<String, String>.from(widget.initialHeaders!);
+      if (copy.containsKey('Referer')) {
+        _refererController.text = copy.remove('Referer')!;
+      } else if (copy.containsKey('referer')) {
+        _refererController.text = copy.remove('referer')!;
+      }
+      if (copy.isNotEmpty) {
+        _customHeadersController.text =
+            copy.entries.map((e) => '${e.key}: ${e.value}').join('\n');
+      }
+      _showAdvanced = true;
+    }
   }
 
   @override
   void dispose() {
     _urlController.dispose();
     _fileNameController.dispose();
+    _refererController.dispose();
+    _customHeadersController.dispose();
     super.dispose();
   }
 
@@ -78,6 +116,29 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     });
   }
 
+  Map<String, String>? _collectHeaders() {
+    final headers = <String, String>{};
+    final referer = _refererController.text.trim();
+    if (referer.isNotEmpty) {
+      headers['Referer'] = referer;
+    }
+    final raw = _customHeadersController.text.trim();
+    if (raw.isNotEmpty) {
+      final lines = raw.split('\n');
+      for (final line in lines) {
+        final idx = line.indexOf(':');
+        if (idx > 0) {
+          final key = line.substring(0, idx).trim();
+          final val = line.substring(idx + 1).trim();
+          if (key.isNotEmpty && val.isNotEmpty) {
+            headers[key] = val;
+          }
+        }
+      }
+    }
+    return headers.isNotEmpty ? headers : null;
+  }
+
   Future<void> _probeUrl(String url) async {
     if (!url.startsWith('http://') && !url.startsWith('https://')) return;
     setState(() {
@@ -85,7 +146,8 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     });
 
     try {
-      final info = await widget.httpService.probeUrl(url);
+      final headers = _collectHeaders();
+      final info = await widget.httpService.probeUrl(url, headers: headers);
       if (!mounted) return;
 
       if (info.fileName != null && info.fileName!.isNotEmpty) {
@@ -130,6 +192,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       fileName: fileName,
       targetDirectory: _selectedDirectory,
       category: _selectedCategory,
+      headers: _collectHeaders(),
     );
 
     Navigator.of(context).pop();
@@ -286,6 +349,62 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
                     ),
                   ),
                 ),
+
+                const SizedBox(height: 12),
+
+                // Advanced Headers Toggle & Fields
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _showAdvanced = !_showAdvanced;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6.0, horizontal: 2.0),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _showAdvanced ? Icons.expand_less : Icons.expand_more,
+                          size: 20,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Advanced: Referer & HTTP Headers',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                if (_showAdvanced) ...[
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _refererController,
+                    decoration: const InputDecoration(
+                      labelText: 'Referer Header (Webpage URL)',
+                      hintText: 'https://example.com/watch-video',
+                      border: OutlineInputBorder(),
+                      helperText: 'Required for videos and CDNs verifying page origin',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _customHeadersController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Custom Headers (Key: Value)',
+                      hintText: 'Cookie: session=xyz\nOrigin: https://example.com',
+                      border: OutlineInputBorder(),
+                      helperText: 'One per line, e.g. "Cookie: ..."',
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

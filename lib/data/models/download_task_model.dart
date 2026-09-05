@@ -18,6 +18,7 @@ class DownloadTaskModel {
       'dateAdded': task.dateAdded.toIso8601String(),
       'dateCompleted': task.dateCompleted?.toIso8601String(),
       'errorMessage': task.errorMessage,
+      'headers': task.headers,
     };
   }
 
@@ -34,6 +35,15 @@ class DownloadTaskModel {
       orElse: () => DownloadCategory.other,
     );
 
+    Map<String, String>? headers;
+    if (json['headers'] != null && json['headers'] is Map) {
+      headers = Map<String, String>.from(
+        (json['headers'] as Map).map(
+          (key, value) => MapEntry(key.toString(), value.toString()),
+        ),
+      );
+    }
+
     return DownloadTask(
       id: json['id'] as String,
       url: json['url'] as String,
@@ -49,6 +59,7 @@ class DownloadTaskModel {
           ? DateTime.tryParse(json['dateCompleted'] as String)
           : null,
       errorMessage: json['errorMessage'] as String?,
+      headers: headers,
     );
   }
 }
