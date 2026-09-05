@@ -108,6 +108,7 @@ chrome.webRequest.onResponseStarted.addListener(
       }
     }
 
+    const isMediaResourceType = details.type === 'media';
     const isVideoMime = mimeType.startsWith('video/') ||
       mimeType.includes('application/vnd.apple.mpegurl') ||
       mimeType.includes('application/x-mpegurl') ||
@@ -116,13 +117,15 @@ chrome.webRequest.onResponseStarted.addListener(
 
     const isAudioMime = mimeType.startsWith('audio/');
     const matchesExtension = MEDIA_EXT_REGEX.test(details.url);
+    const hasMediaInQuery = /[?&](mime=video|mime=audio|format=m3u8|format=mpd)/i.test(details.url) ||
+      details.url.includes('/videoplayback');
 
-    if (!isVideoMime && !isAudioMime && !matchesExtension) {
+    if (!isMediaResourceType && !isVideoMime && !isAudioMime && !matchesExtension && !hasMediaInQuery) {
       return;
     }
 
     const config = await getConfig();
-    if (contentLength > 0 && contentLength < config.minVideoSizeBytes && !matchesExtension) {
+    if (contentLength > 0 && contentLength < config.minVideoSizeBytes && !matchesExtension && !hasMediaInQuery) {
       // Skip tiny video ads/sounds unless explicitly matching media extension
       return;
     }
@@ -254,12 +257,23 @@ chrome.downloads.onCreated.addListener(async (downloadItem) => {
 
 // 4. Send Download Task to Desktop VirusDownloader App
 async function sendToDesktopApp(payload) {
+  let url = (payload.url || '').trim();
+  if (url.startsWith('//')) {
+    url = 'https:' + url;
+  }
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) {
+    return {
+      success: false,
+      error: 'Cannot download browser-internal blob/data stream directly. Please click the extension icon to select the sniffed media stream.'
+    };
+  }
+
   const config = await getConfig();
   const targetUrl = `${config.serverUrl.replace(/\/$/, '')}/add`;
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 6000);
 
     const res = await fetch(targetUrl, {
       method: 'POST',
@@ -267,7 +281,7 @@ async function sendToDesktopApp(payload) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        url: payload.url,
+        url: url,
         fileName: payload.fileName,
         headers: payload.headers || {},
         category: payload.category || 'other'
@@ -276,11 +290,11 @@ async function sendToDesktopApp(payload) {
     });
     clearTimeout(timeout);
 
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      const data = await res.json();
       return { success: true, data };
     }
-    return { success: false, error: `App responded with HTTP ${res.status}` };
+    return { success: false, error: data.error || `App responded with HTTP ${res.status}` };
   } catch (err) {
     return { success: false, error: 'Cannot connect to VirusDownloader. Is the app running?' };
   }

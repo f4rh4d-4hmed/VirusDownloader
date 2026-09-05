@@ -92,45 +92,74 @@
       e.stopPropagation();
       e.preventDefault();
 
-      const src = video.currentSrc || video.src;
-      if (!src) {
-        alert('No direct video stream found for this player.');
+      let targetUrl = video.currentSrc || video.src || '';
+
+      badge.classList.add('vd-btn-loading');
+      badge.querySelector('span').innerText = 'Finding video stream...';
+
+      function doSend(url, fileName, headers, category) {
+        badge.querySelector('span').innerText = 'Sending to VirusDownloader...';
+        chrome.runtime.sendMessage({
+          type: 'SEND_TO_APP',
+          payload: {
+            url: url,
+            fileName: fileName,
+            headers: headers || {
+              'Referer': window.location.href,
+              'User-Agent': navigator.userAgent
+            },
+            category: category || 'video'
+          }
+        }, (response) => {
+          badge.classList.remove('vd-btn-loading');
+          if (response && response.success) {
+            badge.classList.add('vd-btn-success');
+            badge.querySelector('span').innerText = '✓ Sent to VirusDownloader!';
+            setTimeout(() => {
+              badge.classList.remove('vd-btn-success');
+              badge.querySelector('span').innerText = 'Download with VirusDownloader';
+            }, 3000);
+          } else {
+            badge.classList.add('vd-btn-error');
+            badge.querySelector('span').innerText = (response && response.error) || 'Failed to connect';
+            setTimeout(() => {
+              badge.classList.remove('vd-btn-error');
+              badge.querySelector('span').innerText = 'Download with VirusDownloader';
+            }, 4500);
+          }
+        });
+      }
+
+      // If video is dynamic blob or empty, fetch sniffed media stream from background
+      if (!targetUrl || targetUrl.startsWith('blob:') || targetUrl.startsWith('data:')) {
+        chrome.runtime.sendMessage({ type: 'GET_TAB_MEDIA' }, (res) => {
+          const media = (res && res.media) || [];
+          if (media.length > 0) {
+            const best = media.find(m => m.category === 'video' || m.category === 'hls_stream') || media[0];
+            doSend(best.url, best.fileName, best.headers, best.category);
+          } else {
+            badge.classList.remove('vd-btn-loading');
+            badge.classList.add('vd-btn-error');
+            badge.querySelector('span').innerText = 'Play video 2s to capture stream, then click';
+            setTimeout(() => {
+              badge.classList.remove('vd-btn-error');
+              badge.querySelector('span').innerText = 'Download with VirusDownloader';
+            }, 4000);
+          }
+        });
         return;
       }
 
-      badge.classList.add('vd-btn-loading');
-      badge.querySelector('span').innerText = 'Sending to VirusDownloader...';
+      // Normalize protocol-relative URL
+      if (targetUrl.startsWith('//')) {
+        targetUrl = window.location.protocol + targetUrl;
+      }
 
-      const fileName = getCleanFileName(src, document.title);
-      chrome.runtime.sendMessage({
-        type: 'SEND_TO_APP',
-        payload: {
-          url: src,
-          fileName: fileName,
-          headers: {
-            'Referer': window.location.href,
-            'User-Agent': navigator.userAgent
-          },
-          category: 'video'
-        }
-      }, (response) => {
-        badge.classList.remove('vd-btn-loading');
-        if (response && response.success) {
-          badge.classList.add('vd-btn-success');
-          badge.querySelector('span').innerText = '✓ Sent to VirusDownloader!';
-          setTimeout(() => {
-            badge.classList.remove('vd-btn-success');
-            badge.querySelector('span').innerText = 'Download with VirusDownloader';
-          }, 3000);
-        } else {
-          badge.classList.add('vd-btn-error');
-          badge.querySelector('span').innerText = (response && response.error) || 'Failed to connect';
-          setTimeout(() => {
-            badge.classList.remove('vd-btn-error');
-            badge.querySelector('span').innerText = 'Download with VirusDownloader';
-          }, 3500);
-        }
-      });
+      const fileName = getCleanFileName(targetUrl, document.title);
+      doSend(targetUrl, fileName, {
+        'Referer': window.location.href,
+        'User-Agent': navigator.userAgent
+      }, 'video');
     });
 
     let hideTimeout;

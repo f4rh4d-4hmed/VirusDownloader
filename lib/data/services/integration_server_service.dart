@@ -102,10 +102,35 @@ class IntegrationServerService extends ChangeNotifier {
         final content = await utf8.decoder.bind(request).join();
         final data = jsonDecode(content) as Map<String, dynamic>;
 
-        final url = (data['url'] as String? ?? '').trim();
+        var url = (data['url'] as String? ?? '').trim();
+
+        // 1. Check for browser-internal memory URLs (blob / data)
+        if (url.startsWith('blob:') || url.startsWith('data:')) {
+          request.response.statusCode = HttpStatus.badRequest;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'error':
+                'Browser-internal blob stream cannot be downloaded directly. Please select the captured stream from the VirusDownloader toolbar extension.',
+          }));
+          await request.response.close();
+          return;
+        }
+
+        // 2. Normalize protocol-relative and missing scheme URLs
+        if (url.startsWith('//')) {
+          url = 'https:$url';
+        } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          if (url.contains('.') && !url.contains(' ')) {
+            url = 'https://$url';
+          }
+        }
+
         if (url.isEmpty || (!url.startsWith('http://') && !url.startsWith('https://'))) {
           request.response.statusCode = HttpStatus.badRequest;
-          request.response.write(jsonEncode({'error': 'Invalid or missing URL'}));
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(jsonEncode({
+            'error': 'Invalid URL: "$url". A valid HTTP or HTTPS URL is required.',
+          }));
           await request.response.close();
           return;
         }
