@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'core/app_scroll_behavior.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
 import 'ui/shell.dart';
@@ -16,6 +17,7 @@ class VirusDownloaderApp extends StatelessWidget {
     return MaterialApp(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
+      scrollBehavior: const AppScrollBehavior(),
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: settingsVm.settings.themeMode,
@@ -23,4 +25,3 @@ class VirusDownloaderApp extends StatelessWidget {
     );
   }
 }
-

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,6 +23,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _listScrollController = ScrollController();
+  final ScrollController _filterScrollController = ScrollController();
   bool _showSearch = false;
 
   @override
@@ -37,6 +40,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _listScrollController.dispose();
+    _filterScrollController.dispose();
     super.dispose();
   }
 
@@ -140,24 +145,30 @@ class _HomePageState extends State<HomePage> {
                             ? 'No downloads match the selected filters'
                             : null),
                   )
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: tasks.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final task = tasks[index];
-                      return DownloadTile(
-                        key: ValueKey(task.id),
-                        task: task,
-                        fileService: fileService,
-                        onPause: () => downloadsVm.pause(task.id),
-                        onResume: () => downloadsVm.resume(task.id),
-                        onCancel: () => downloadsVm.cancel(task.id),
-                        onRetry: () => downloadsVm.retry(task.id),
-                        onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
-                        onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
-                      );
-                    },
+                : Scrollbar(
+                    controller: _listScrollController,
+                    thumbVisibility: true,
+                    interactive: true,
+                    child: ListView.separated(
+                      controller: _listScrollController,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: tasks.length,
+                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+                        return DownloadTile(
+                          key: ValueKey(task.id),
+                          task: task,
+                          fileService: fileService,
+                          onPause: () => downloadsVm.pause(task.id),
+                          onResume: () => downloadsVm.resume(task.id),
+                          onCancel: () => downloadsVm.cancel(task.id),
+                          onRetry: () => downloadsVm.retry(task.id),
+                          onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
+                          onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
+                        );
+                      },
+                    ),
                   ),
           ),
 
@@ -291,78 +302,93 @@ class _HomePageState extends State<HomePage> {
     return Container(
       height: 48,
       color: theme.colorScheme.surface,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
-        children: [
-          // Status Chips
-          _buildFilterChip(
-            label: 'All',
-            count: vm.totalCount,
-            isSelected: vm.statusFilter == null && vm.categoryFilter == DownloadCategory.all,
-            onSelected: () {
-              vm.setStatusFilter(null);
-              vm.setCategoryFilter(DownloadCategory.all);
-            },
-          ),
-          const SizedBox(width: 6),
-          _buildFilterChip(
-            label: 'Downloading',
-            count: vm.downloadingCount,
-            isSelected: vm.statusFilter == DownloadStatus.downloading,
-            onSelected: () {
-              vm.setStatusFilter(
-                vm.statusFilter == DownloadStatus.downloading ? null : DownloadStatus.downloading,
-              );
-            },
-          ),
-          const SizedBox(width: 6),
-          _buildFilterChip(
-            label: 'Completed',
-            count: vm.completedCount,
-            isSelected: vm.statusFilter == DownloadStatus.completed,
-            onSelected: () {
-              vm.setStatusFilter(
-                vm.statusFilter == DownloadStatus.completed ? null : DownloadStatus.completed,
-              );
-            },
-          ),
-          const SizedBox(width: 6),
-          _buildFilterChip(
-            label: 'Failed',
-            count: vm.failedCount,
-            isSelected: vm.statusFilter == DownloadStatus.failed,
-            onSelected: () {
-              vm.setStatusFilter(
-                vm.statusFilter == DownloadStatus.failed ? null : DownloadStatus.failed,
-              );
-            },
-          ),
-
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8.0),
-            child: VerticalDivider(indent: 4, endIndent: 4),
-          ),
-
-          // Category Chips (Documents, Videos, Audio, Archives, Programs, Other)
-          ...DownloadCategory.values.where((c) => c != DownloadCategory.all).map((cat) {
-            final count = vm.getCountForCategory(cat);
-            return Padding(
-              padding: const EdgeInsets.only(right: 6.0),
-              child: _buildFilterChip(
-                label: AppUtils.getCategoryLabel(cat),
-                icon: AppUtils.getCategoryIcon(cat),
-                count: count,
-                isSelected: vm.categoryFilter == cat,
-                onSelected: () {
-                  vm.setCategoryFilter(
-                    vm.categoryFilter == cat ? DownloadCategory.all : cat,
-                  );
-                },
-              ),
+      child: Listener(
+        onPointerSignal: (pointerSignal) {
+          if (pointerSignal is PointerScrollEvent && _filterScrollController.hasClients) {
+            final delta = pointerSignal.scrollDelta.dy != 0
+                ? pointerSignal.scrollDelta.dy
+                : pointerSignal.scrollDelta.dx;
+            final target = (_filterScrollController.offset + delta).clamp(
+              0.0,
+              _filterScrollController.position.maxScrollExtent,
             );
-          }),
-        ],
+            _filterScrollController.jumpTo(target);
+          }
+        },
+        child: ListView(
+          controller: _filterScrollController,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
+          children: [
+            // Status Chips
+            _buildFilterChip(
+              label: 'All',
+              count: vm.totalCount,
+              isSelected: vm.statusFilter == null && vm.categoryFilter == DownloadCategory.all,
+              onSelected: () {
+                vm.setStatusFilter(null);
+                vm.setCategoryFilter(DownloadCategory.all);
+              },
+            ),
+            const SizedBox(width: 6),
+            _buildFilterChip(
+              label: 'Downloading',
+              count: vm.downloadingCount,
+              isSelected: vm.statusFilter == DownloadStatus.downloading,
+              onSelected: () {
+                vm.setStatusFilter(
+                  vm.statusFilter == DownloadStatus.downloading ? null : DownloadStatus.downloading,
+                );
+              },
+            ),
+            const SizedBox(width: 6),
+            _buildFilterChip(
+              label: 'Completed',
+              count: vm.completedCount,
+              isSelected: vm.statusFilter == DownloadStatus.completed,
+              onSelected: () {
+                vm.setStatusFilter(
+                  vm.statusFilter == DownloadStatus.completed ? null : DownloadStatus.completed,
+                );
+              },
+            ),
+            const SizedBox(width: 6),
+            _buildFilterChip(
+              label: 'Failed',
+              count: vm.failedCount,
+              isSelected: vm.statusFilter == DownloadStatus.failed,
+              onSelected: () {
+                vm.setStatusFilter(
+                  vm.statusFilter == DownloadStatus.failed ? null : DownloadStatus.failed,
+                );
+              },
+            ),
+
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8.0),
+              child: VerticalDivider(indent: 4, endIndent: 4),
+            ),
+
+            // Category Chips (Documents, Videos, Audio, Archives, Programs, Other)
+            ...DownloadCategory.values.where((c) => c != DownloadCategory.all).map((cat) {
+              final count = vm.getCountForCategory(cat);
+              return Padding(
+                padding: const EdgeInsets.only(right: 6.0),
+                child: _buildFilterChip(
+                  label: AppUtils.getCategoryLabel(cat),
+                  icon: AppUtils.getCategoryIcon(cat),
+                  count: count,
+                  isSelected: vm.categoryFilter == cat,
+                  onSelected: () {
+                    vm.setCategoryFilter(
+                      vm.categoryFilter == cat ? DownloadCategory.all : cat,
+                    );
+                  },
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
