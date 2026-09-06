@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 @immutable
 class DownloadStatusColors extends ThemeExtension<DownloadStatusColors> {
@@ -74,6 +75,18 @@ class AppTheme {
     ),
     extensions: const [DownloadStatusColors.light],
     scaffoldBackgroundColor: const Color(0xFFF8F9FA),
+    appBarTheme: const AppBarTheme(
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      backgroundColor: Colors.transparent,
+      systemOverlayStyle: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Color(0xFFF8F9FA),
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+    ),
     cardTheme: const CardThemeData(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -103,6 +116,18 @@ class AppTheme {
     ),
     extensions: const [DownloadStatusColors.dark],
     scaffoldBackgroundColor: const Color(0xFF141418),
+    appBarTheme: const AppBarTheme(
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      backgroundColor: Colors.transparent,
+      systemOverlayStyle: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Color(0xFF141418),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    ),
     cardTheme: const CardThemeData(
       elevation: 0,
       color: Color(0xFF1E1E24),

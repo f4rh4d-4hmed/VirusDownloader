@@ -6,9 +6,11 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'core/constants.dart';
+import 'core/utils.dart';
 import 'data/repositories/download_repository.dart';
 import 'data/repositories/settings_repository.dart';
 import 'data/services/browser_integration_service.dart';
+import 'data/services/ffmpeg_service.dart';
 import 'data/services/file_service.dart';
 import 'data/services/http_download_service.dart';
 import 'data/services/integration_server_service.dart';
@@ -44,6 +46,7 @@ void main() async {
 
   final fileService = FileService();
   final httpService = HttpDownloadService();
+  final ffmpegService = FfmpegService();
 
   final settingsRepository = SettingsRepository(storageService: storageService);
   await settingsRepository.init();
@@ -53,6 +56,7 @@ void main() async {
     storageService: storageService,
     fileService: fileService,
     settingsRepo: settingsRepository,
+    ffmpegService: ffmpegService,
   );
   await downloadRepository.init();
 
@@ -62,7 +66,9 @@ void main() async {
     downloadRepository: downloadRepository,
     fileService: fileService,
   );
-  await integrationServer.start();
+  if (!AppUtils.isMobile) {
+    await integrationServer.start();
+  }
 
   runApp(
     MultiProvider(
@@ -71,6 +77,7 @@ void main() async {
         Provider<StorageService>.value(value: storageService),
         Provider<FileService>.value(value: fileService),
         Provider<HttpDownloadService>.value(value: httpService),
+        Provider<FfmpegService>.value(value: ffmpegService),
         Provider<BrowserIntegrationService>.value(value: browserIntegrationService),
         ChangeNotifierProvider<IntegrationServerService>.value(value: integrationServer),
 

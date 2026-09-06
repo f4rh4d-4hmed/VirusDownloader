@@ -44,3 +44,4 @@ flutter:
   assets:
     - extras/extension/
     - extras/extension/icons/
+    - assets/bin/

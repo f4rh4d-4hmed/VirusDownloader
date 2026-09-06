@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (config) => {
     if (config) {
       serverUrlInput.value = config.serverUrl || 'http://127.0.0.1:9849';
-      interceptDownloadsInput.checked = !!config.interceptDownloads;
+      interceptDownloadsInput.checked = config.interceptDownloads !== false;
       showFloatingButtonInput.checked = config.showFloatingButton !== false;
       minVideoSizeInput.value = Math.round((config.minVideoSizeBytes || 0) / 1024);
       ignoredDomainsInput.value = (config.ignoredDomains || []).join('\n');

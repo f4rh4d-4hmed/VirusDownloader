@@ -8,10 +8,68 @@
 
   let config = { showFloatingButton: true };
   const trackedVideos = new Set();
+  let observer = null;
+
+  function isExtensionValid() {
+    try {
+      return Boolean(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function safeSendMessage(message, callback) {
+    if (!isExtensionValid()) {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Extension was reloaded. Please refresh the page (F5).'
+        });
+      }
+      return;
+    }
+
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        const lastError = chrome.runtime?.lastError;
+        if (lastError) {
+          const msg = lastError.message || '';
+          if (msg.includes('context invalidated') || msg.includes('Extension context')) {
+            if (observer) {
+              observer.disconnect();
+              observer = null;
+            }
+            if (callback) callback({ success: false, error: 'Extension was reloaded. Please refresh the page (F5).' });
+          } else {
+            if (callback) callback({ success: false, error: msg });
+          }
+          return;
+        }
+        if (callback) callback(response);
+      });
+    } catch (err) {
+      const msg = (err && err.message) || String(err);
+      if (msg.includes('context invalidated') || msg.includes('Extension context')) {
+        if (observer) {
+          observer.disconnect();
+          observer = null;
+        }
+        if (callback) callback({ success: false, error: 'Extension was reloaded. Please refresh the page (F5).' });
+      } else {
+        if (callback) callback({ success: false, error: msg });
+      }
+    }
+  }
 
   // Fetch initial config
   chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (res) => {
     if (res) config = res;
+  safeSendMessage({ type: 'GET_CONFIG' }, (res) => {
+    if (res && res.showFloatingButton !== undefined) config = res;
     scanDomForMedia();
   });
 
@@ -19,8 +77,17 @@
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.virusDownloaderConfig) {
       config = changes.virusDownloaderConfig.newValue;
+  // Listen for config changes safely
+  try {
+    if (chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener((changes) => {
+        if (changes?.virusDownloaderConfig) {
+          config = changes.virusDownloaderConfig.newValue;
+        }
+      });
     }
   });
+  } catch (_) {}
 
   function getCleanFileName(url, defaultBase) {
     try {
@@ -38,15 +105,21 @@
 
   function reportMedia(url, videoEl) {
     if (!url || url.startsWith('blob:') || url.startsWith('data:')) return;
+    if (!isExtensionValid()) return;
 
-    const fileName = getCleanFileName(url, document.title);
+    let absoluteUrl = url;
+    try {
+      absoluteUrl = new URL(url, window.location.href).href;
+    } catch (_) {}
+
+    const fileName = getCleanFileName(absoluteUrl, document.title);
     const item = {
-      id: `dom_${url.substring(0, 80)}_${Date.now()}`,
-      url: url,
+      id: `dom_${absoluteUrl.substring(0, 80)}_${Date.now()}`,
+      url: absoluteUrl,
       fileName: fileName,
       tabTitle: document.title || 'Web Video',
       tabUrl: window.location.href,
-      category: 'video',
+      category: 'videos',
       mimeType: 'video/mp4',
       sizeBytes: 0,
       headers: {
@@ -56,6 +129,7 @@
     };
 
     chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'DOM_MEDIA_FOUND',
       items: [item]
     });
@@ -92,7 +166,34 @@
       e.stopPropagation();
       e.preventDefault();
 
-      let targetUrl = video.currentSrc || video.src || '';
+      // Resolve video target URL: check currentSrc, src, source child tags, and data attributes
+      let targetUrl = '';
+      if (video.currentSrc && !video.currentSrc.startsWith('blob:') && !video.currentSrc.startsWith('data:')) {
+        targetUrl = video.currentSrc;
+      } else if (video.src && !video.src.startsWith('blob:') && !video.src.startsWith('data:')) {
+        targetUrl = video.src;
+      } else {
+        const sources = Array.from(video.querySelectorAll('source'));
+        for (const s of sources) {
+          const sSrc = s.src || s.getAttribute('src');
+          if (sSrc && !sSrc.startsWith('blob:') && !sSrc.startsWith('data:')) {
+            targetUrl = sSrc;
+            break;
+          }
+        }
+        if (!targetUrl) {
+          const dataSrc = video.dataset.src || video.getAttribute('data-src') || video.getAttribute('data-url') || video.getAttribute('data-video');
+          if (dataSrc && !dataSrc.startsWith('blob:') && !dataSrc.startsWith('data:')) {
+            targetUrl = dataSrc;
+          }
+        }
+      }
+
+      if (targetUrl) {
+        try {
+          targetUrl = new URL(targetUrl, window.location.href).href;
+        } catch (_) {}
+      }
 
       badge.classList.add('vd-btn-loading');
       badge.querySelector('span').innerText = 'Finding video stream...';
@@ -100,6 +201,7 @@
       function doSend(url, fileName, headers, category) {
         badge.querySelector('span').innerText = 'Sending to VirusDownloader...';
         chrome.runtime.sendMessage({
+        safeSendMessage({
           type: 'SEND_TO_APP',
           payload: {
             url: url,
@@ -108,7 +210,7 @@
               'Referer': window.location.href,
               'User-Agent': navigator.userAgent
             },
-            category: category || 'video'
+            category: category || 'videos'
           }
         }, (response) => {
           badge.classList.remove('vd-btn-loading');
@@ -122,10 +224,13 @@
           } else {
             badge.classList.add('vd-btn-error');
             badge.querySelector('span').innerText = (response && response.error) || 'Failed to connect';
+            const err = (response && response.error) || 'Failed to connect';
+            badge.querySelector('span').innerText = err;
             setTimeout(() => {
               badge.classList.remove('vd-btn-error');
               badge.querySelector('span').innerText = 'Download with VirusDownloader';
             }, 4500);
+            }, err.includes('refresh') ? 6000 : 4500);
           }
         });
       }
@@ -133,14 +238,20 @@
       // If video is dynamic blob or empty, fetch sniffed media stream from background
       if (!targetUrl || targetUrl.startsWith('blob:') || targetUrl.startsWith('data:')) {
         chrome.runtime.sendMessage({ type: 'GET_TAB_MEDIA' }, (res) => {
+        safeSendMessage({ type: 'GET_TAB_MEDIA' }, (res) => {
           const media = (res && res.media) || [];
           if (media.length > 0) {
-            const best = media.find(m => m.category === 'video' || m.category === 'hls_stream') || media[0];
+            // Prioritize master manifest (HLS .m3u8, DASH .mpd) or full mp4 over fragments
+            const best = media.find(m => m.url.includes('.m3u8') || m.url.includes('.mpd')) ||
+                         media.find(m => m.category === 'videos' || m.category === 'video') ||
+                         media[0];
             doSend(best.url, best.fileName, best.headers, best.category);
           } else {
             badge.classList.remove('vd-btn-loading');
             badge.classList.add('vd-btn-error');
             badge.querySelector('span').innerText = 'Play video 2s to capture stream, then click';
+            const err = (res && res.error) || 'Play video 2s to capture stream, then click';
+            badge.querySelector('span').innerText = err;
             setTimeout(() => {
               badge.classList.remove('vd-btn-error');
               badge.querySelector('span').innerText = 'Download with VirusDownloader';
@@ -150,16 +261,11 @@
         return;
       }
 
-      // Normalize protocol-relative URL
-      if (targetUrl.startsWith('//')) {
-        targetUrl = window.location.protocol + targetUrl;
-      }
-
       const fileName = getCleanFileName(targetUrl, document.title);
       doSend(targetUrl, fileName, {
         'Referer': window.location.href,
         'User-Agent': navigator.userAgent
-      }, 'video');
+      }, 'videos');
     });
 
     let hideTimeout;
@@ -186,6 +292,14 @@
 
   // Scan document for video and audio elements
   function scanDomForMedia() {
+    if (!isExtensionValid()) {
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      return;
+    }
+
     const videos = document.querySelectorAll('video');
     videos.forEach((video) => {
       if (!trackedVideos.has(video)) {
@@ -223,6 +337,7 @@
 
   // MutationObserver for SPA navigation and dynamic video injection
   const observer = new MutationObserver(() => {
+  observer = new MutationObserver(() => {
     scanDomForMedia();
   });
 
@@ -232,6 +347,9 @@
   } else {
     document.addEventListener('DOMContentLoaded', () => {
       observer.observe(document.body, { childList: true, subtree: true });
+      if (document.body && observer) {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
       scanDomForMedia();
     });
   }

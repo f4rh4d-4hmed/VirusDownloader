@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/utils.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../data/services/browser_integration_service.dart';
 import '../../data/services/integration_server_service.dart';
@@ -43,6 +44,8 @@ class SettingsViewModel extends ChangeNotifier {
   int get receivedTasksCount => integrationServer.receivedTasksCount;
 
   Future<void> initBrowserIntegration() async {
+    if (AppUtils.isMobile) return;
+
     _isDetectingBrowsers = true;
     notifyListeners();
 

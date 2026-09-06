@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
+import '../../core/utils.dart';
 import '../view_models/settings_view_model.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -182,8 +183,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
               const SizedBox(height: 28),
 
-              // Browser Integration & Extension Section
-              Row(
+              if (!AppUtils.isMobile) ...[
+                // Browser Integration & Extension Section
+                Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
@@ -370,6 +372,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
 
               const SizedBox(height: 28),
+              ],
 
               // About Section
               Text(

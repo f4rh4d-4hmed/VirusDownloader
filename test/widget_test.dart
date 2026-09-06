@@ -40,6 +40,14 @@ void main() {
         'movie trailer.mp4',
       );
     });
+
+    test('isMobile and isDesktop properties return boolean flags', () {
+      expect(AppUtils.isMobile, isA<bool>());
+      expect(AppUtils.isDesktop, isA<bool>());
+      // On Windows test environment, isDesktop should be true and isMobile should be false
+      expect(AppUtils.isDesktop, isTrue);
+      expect(AppUtils.isMobile, isFalse);
+    });
   });
 
   group('DownloadTask Domain Model Tests', () {

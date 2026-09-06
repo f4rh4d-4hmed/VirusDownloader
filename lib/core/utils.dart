@@ -1,8 +1,16 @@
+import 'dart:io';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'enums.dart';
 
 class AppUtils {
+  /// Whether the app is running on a mobile OS (Android, iOS)
+  static bool get isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  /// Whether the app is running on a desktop OS (Windows, macOS, Linux)
+  static bool get isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   /// Formats byte count to human-readable string (e.g. 1.25 MB, 450 KB, 2.1 GB)
   static String formatFileSize(int bytes) {
     if (bytes <= 0) return '0 B';
@@ -35,9 +43,13 @@ class AppUtils {
     }
   }
 
-  /// Determines DownloadCategory based on file extension
-  static DownloadCategory categoryFromExtension(String extension) {
-    final cleanExt = extension.toLowerCase().replaceAll('.', '').trim();
+  /// Determines DownloadCategory based on file extension or filename
+  static DownloadCategory categoryFromExtension(String extensionOrFileName) {
+    String cleanExt = extensionOrFileName.toLowerCase().trim();
+    if (cleanExt.contains('.')) {
+      cleanExt = cleanExt.split('.').last;
+    }
+    cleanExt = cleanExt.replaceAll('.', '').trim();
 
     const docExts = {'pdf', 'doc', 'docx', 'txt', 'rtf', 'odt', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'md'};
     const imageExts = {'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'ico'};

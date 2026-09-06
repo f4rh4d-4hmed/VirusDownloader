@@ -121,6 +121,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       emptyMediaState.style.display = 'none';
       mediaList.innerHTML = '';
 
+      // Sort so master streams (.m3u8 / .mpd) and complete videos appear first
+      media.sort((a, b) => {
+        const aMaster = (a.url || '').includes('.m3u8') || (a.url || '').includes('.mpd');
+        const bMaster = (b.url || '').includes('.m3u8') || (b.url || '').includes('.mpd');
+        if (aMaster && !bMaster) return -1;
+        if (!aMaster && bMaster) return 1;
+        return 0;
+      });
+
       media.forEach((item) => {
         const card = document.createElement('div');
         card.className = 'media-card';
@@ -168,13 +177,17 @@ document.addEventListener('DOMContentLoaded', async () => {
           const origText = sendBtn.querySelector('span').innerText;
           sendBtn.querySelector('span').innerText = 'Sending...';
 
+          const headers = { ...(item.headers || {}) };
+          delete headers['range'];
+          delete headers['Range'];
+
           chrome.runtime.sendMessage({
             type: 'SEND_TO_APP',
             payload: {
               url: item.url,
               fileName: item.fileName,
-              headers: item.headers,
-              category: item.category
+              headers: headers,
+              category: item.category || 'videos'
             }
           }, (res) => {
             sendBtn.disabled = false;
@@ -231,7 +244,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 8. Intercept Toggle
   chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (cfg) => {
     if (cfg) {
-      interceptToggle.checked = !!cfg.interceptDownloads;
+      interceptToggle.checked = cfg.interceptDownloads !== false;
     }
   });
 
@@ -277,7 +290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         url: url,
         fileName: manualFileName.value.trim() || 'video.mp4',
         headers: headers,
-        category: 'video'
+        category: 'videos'
       }
     }, (res) => {
       manualSendBtn.disabled = false;

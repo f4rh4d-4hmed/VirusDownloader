@@ -47,3 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 fix-git-index.bat
+fix-git-index.ps1
+.vscode/tasks.json
+.vscode/settings.json
+extras/ffmpeg/

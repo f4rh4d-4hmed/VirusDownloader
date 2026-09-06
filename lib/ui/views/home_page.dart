@@ -38,6 +38,14 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialStatusFilter != oldWidget.initialStatusFilter) {
+      context.read<DownloadsViewModel>().setStatusFilter(widget.initialStatusFilter);
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _listScrollController.dispose();
@@ -125,60 +133,64 @@ class _HomePageState extends State<HomePage> {
     final tasks = downloadsVm.tasks;
 
     return Scaffold(
-      body: Column(
-        children: [
-          // Top Action Toolbar
-          _buildToolbar(context, downloadsVm),
+      body: SafeArea(
+        top: true,
+        bottom: false,
+        child: Column(
+          children: [
+            // Top Action Toolbar
+            _buildToolbar(context, downloadsVm),
 
-          // Horizontal Filter Chips Bar (FDM Style)
-          _buildFilterChipsBar(context, downloadsVm),
+            // Horizontal Filter Chips Bar (FDM Style)
+            _buildFilterChipsBar(context, downloadsVm),
 
-          const Divider(height: 1),
+            const Divider(height: 1),
 
-          // Main Download List Area
-          Expanded(
-            child: tasks.isEmpty
-                ? EmptyState(
-                    onAddDownload: () => _openAddDownloadDialog(context),
-                    filterMessage: downloadsVm.searchQuery.isNotEmpty
-                        ? 'No downloads match "${downloadsVm.searchQuery}"'
-                        : (downloadsVm.categoryFilter != DownloadCategory.all ||
-                                downloadsVm.statusFilter != null
-                            ? 'No downloads match the selected filters'
-                            : null),
-                  )
-                : Scrollbar(
-                    controller: _listScrollController,
-                    thumbVisibility: true,
-                    interactive: true,
-                    child: ListView.separated(
+            // Main Download List Area
+            Expanded(
+              child: tasks.isEmpty
+                  ? EmptyState(
+                      onAddDownload: () => _openAddDownloadDialog(context),
+                      filterMessage: downloadsVm.searchQuery.isNotEmpty
+                          ? 'No downloads match "${downloadsVm.searchQuery}"'
+                          : (downloadsVm.categoryFilter != DownloadCategory.all ||
+                                  downloadsVm.statusFilter != null
+                              ? 'No downloads match the selected filters'
+                              : null),
+                    )
+                  : Scrollbar(
                       controller: _listScrollController,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      itemCount: tasks.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final task = tasks[index];
-                        return DownloadTile(
-                          key: ValueKey(task.id),
-                          task: task,
-                          fileService: fileService,
-                          onPause: () => downloadsVm.pause(task.id),
-                          onResume: () => downloadsVm.resume(task.id),
-                          onCancel: () => downloadsVm.cancel(task.id),
-                          onRetry: () => downloadsVm.retry(task.id),
-                          onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
-                          onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
-                        );
-                      },
+                      thumbVisibility: true,
+                      interactive: true,
+                      child: ListView.separated(
+                        controller: _listScrollController,
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: tasks.length,
+                        separatorBuilder: (context, index) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final task = tasks[index];
+                          return DownloadTile(
+                            key: ValueKey(task.id),
+                            task: task,
+                            fileService: fileService,
+                            onPause: () => downloadsVm.pause(task.id),
+                            onResume: () => downloadsVm.resume(task.id),
+                            onCancel: () => downloadsVm.cancel(task.id),
+                            onRetry: () => downloadsVm.retry(task.id),
+                            onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
+                            onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-          ),
+            ),
 
-          const Divider(height: 1),
+            const Divider(height: 1),
 
-          // Bottom Status Bar
-          _buildStatusBar(context, downloadsVm),
-        ],
+            // Bottom Status Bar
+            _buildStatusBar(context, downloadsVm),
+          ],
+        ),
       ),
     );
   }
@@ -186,115 +198,158 @@ class _HomePageState extends State<HomePage> {
   Widget _buildToolbar(BuildContext context, DownloadsViewModel vm) {
     final theme = Theme.of(context);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-      ),
-      child: Row(
-        children: [
-          // Add URL Button
-          FilledButton.icon(
-            onPressed: () => _openAddDownloadDialog(context),
-            icon: const Icon(Icons.add_rounded, size: 20),
-            label: const Text('Add URL'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
-          ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 550;
 
-          const SizedBox(width: 12),
-
-          // Pause All
-          OutlinedButton.icon(
-            onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
-            icon: const Icon(Icons.pause_rounded, size: 18),
-            label: const Text('Pause All'),
-            style: OutlinedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-
-          const SizedBox(width: 8),
-
-          // Resume All
-          OutlinedButton.icon(
-            onPressed: () => vm.resumeAll(),
-            icon: const Icon(Icons.play_arrow_rounded, size: 18),
-            label: const Text('Resume All'),
-            style: OutlinedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-
-          const Spacer(),
-
-          // Search Field
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: _showSearch ? 260 : 44,
-            child: _showSearch
-                ? TextField(
+        if (_showSearch) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            decoration: BoxDecoration(color: theme.colorScheme.surface),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  tooltip: 'Back',
+                  onPressed: () {
+                    _searchController.clear();
+                    vm.setSearchQuery('');
+                    setState(() {
+                      _showSearch = false;
+                    });
+                  },
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
                     controller: _searchController,
+                    autofocus: true,
                     decoration: InputDecoration(
-                      hintText: 'Search downloads...',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          vm.setSearchQuery('');
-                          setState(() {
-                            _showSearch = false;
-                          });
-                        },
-                      ),
+                      hintText: 'Search downloads by name or URL...',
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () {
+                                _searchController.clear();
+                                vm.setSearchQuery('');
+                                setState(() {});
+                              },
+                            )
+                          : null,
                     ),
-                    onChanged: (val) => vm.setSearchQuery(val),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.search),
-                    tooltip: 'Search',
-                    onPressed: () {
-                      setState(() {
-                        _showSearch = true;
-                      });
+                    onChanged: (val) {
+                      vm.setSearchQuery(val);
+                      setState(() {});
                     },
                   ),
+                ),
+                const SizedBox(width: 8),
+                _buildSortButton(vm),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
           ),
+          child: Row(
+            children: [
+              Text(
+                'Downloads',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(width: 12),
 
-          const SizedBox(width: 8),
+              // Add URL Button
+              FilledButton.icon(
+                onPressed: () => _openAddDownloadDialog(context),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Add URL'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+              ),
 
-          // Sort Menu
-          PopupMenuButton<SortOrder>(
-            icon: const Icon(Icons.sort_rounded),
-            tooltip: 'Sort by',
-            onSelected: (order) => vm.setSortOrder(order),
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                checked: vm.sortOrder == SortOrder.dateAdded,
-                value: SortOrder.dateAdded,
-                child: const Text('Date Added'),
+              if (isWide) ...[
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
+                  icon: const Icon(Icons.pause_rounded, size: 16),
+                  label: const Text('Pause All'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => vm.resumeAll(),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                  label: const Text('Resume All'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                ),
+              ],
+
+              const Spacer(),
+
+              // Search Button
+              IconButton(
+                icon: const Icon(Icons.search_rounded),
+                tooltip: 'Search',
+                onPressed: () {
+                  setState(() {
+                    _showSearch = true;
+                  });
+                },
               ),
-              CheckedPopupMenuItem(
-                checked: vm.sortOrder == SortOrder.name,
-                value: SortOrder.name,
-                child: const Text('Name'),
-              ),
-              CheckedPopupMenuItem(
-                checked: vm.sortOrder == SortOrder.size,
-                value: SortOrder.size,
-                child: const Text('Size'),
-              ),
+
+              const SizedBox(width: 4),
+
+              // Sort Menu
+              _buildSortButton(vm),
             ],
           ),
-        ],
-      ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSortButton(DownloadsViewModel vm) {
+    return PopupMenuButton<SortOrder>(
+      icon: const Icon(Icons.sort_rounded),
+      tooltip: 'Sort by',
+      onSelected: (order) => vm.setSortOrder(order),
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(
+          checked: vm.sortOrder == SortOrder.dateAdded,
+          value: SortOrder.dateAdded,
+          child: const Text('Date Added'),
+        ),
+        CheckedPopupMenuItem(
+          checked: vm.sortOrder == SortOrder.name,
+          value: SortOrder.name,
+          child: const Text('Name'),
+        ),
+        CheckedPopupMenuItem(
+          checked: vm.sortOrder == SortOrder.size,
+          value: SortOrder.size,
+          child: const Text('Size'),
+        ),
+      ],
     );
   }
 

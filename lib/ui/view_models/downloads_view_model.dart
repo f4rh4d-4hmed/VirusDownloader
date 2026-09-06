@@ -81,13 +81,57 @@ class DownloadsViewModel extends ChangeNotifier {
     return result;
   }
 
+  /// Tasks that are actively running, queued, or paused
+  List<DownloadTask> get activeTasks => getActiveTasks();
+
+  /// Returns active tasks, optionally filtered by a specific active status
+  List<DownloadTask> getActiveTasks([DownloadStatus? statusFilter]) {
+    var result = repository.tasks
+        .where((t) =>
+            t.status == DownloadStatus.downloading ||
+            t.status == DownloadStatus.queued ||
+            t.status == DownloadStatus.paused)
+        .toList();
+
+    if (statusFilter != null) {
+      if (statusFilter == DownloadStatus.downloading) {
+        result = result
+            .where((t) =>
+                t.status == DownloadStatus.downloading ||
+                t.status == DownloadStatus.queued)
+            .toList();
+      } else {
+        result = result.where((t) => t.status == statusFilter).toList();
+      }
+    }
+
+    result.sort((a, b) => b.dateAdded.compareTo(a.dateAdded));
+    return result;
+  }
+
   // Stats
   int get totalCount => repository.tasks.length;
+
+  /// Total count of in-progress tasks (downloading + queued + paused)
+  int get activeCount => repository.tasks
+      .where((t) =>
+          t.status == DownloadStatus.downloading ||
+          t.status == DownloadStatus.queued ||
+          t.status == DownloadStatus.paused)
+      .length;
 
   int get downloadingCount => repository.tasks
       .where((t) =>
           t.status == DownloadStatus.downloading ||
           t.status == DownloadStatus.queued)
+      .length;
+
+  int get pausedCount => repository.tasks
+      .where((t) => t.status == DownloadStatus.paused)
+      .length;
+
+  int get queuedCount => repository.tasks
+      .where((t) => t.status == DownloadStatus.queued)
       .length;
 
   int get completedCount => repository.tasks
@@ -159,5 +203,6 @@ class DownloadsViewModel extends ChangeNotifier {
 
   Future<void> pauseAll() => repository.pauseAll();
   Future<void> resumeAll() => repository.resumeAll();
+  Future<void> cancelAllActive() => repository.cancelAllActive();
 }
 

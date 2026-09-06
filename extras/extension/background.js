@@ -8,7 +8,7 @@ const DEFAULT_SERVER_URL = 'http://127.0.0.1:9849';
 
 const DEFAULT_CONFIG = {
   serverUrl: DEFAULT_SERVER_URL,
-  interceptDownloads: false,
+  interceptDownloads: true,
   showFloatingButton: true,
   minVideoSizeBytes: 200 * 1024, // 200 KB
   ignoredDomains: []
@@ -20,6 +20,8 @@ const tabMediaStore = new Map();
 const requestHeadersCache = new Map();
 // Keep track of download IDs triggered by extension to avoid interception loops
 const selfInitiatedDownloads = new Set();
+// Keep track of download IDs currently being intercepted
+const interceptedDownloadIds = new Set();
 
 // Load configuration
 async function getConfig() {
@@ -53,14 +55,45 @@ function extractFileName(url, defaultName = 'download.mp4') {
   return defaultName;
 }
 
-// Determine media category
+// Determine media category matching VirusDownloader enums
 function getMediaCategory(url, mime = '') {
   const lowerUrl = url.toLowerCase();
   const lowerMime = mime.toLowerCase();
-  if (lowerUrl.includes('.m3u8') || lowerMime.includes('mpegurl')) return 'hls_stream';
-  if (lowerUrl.includes('.mpd') || lowerMime.includes('dash+xml')) return 'dash_stream';
+  if (lowerUrl.includes('.m3u8') || lowerMime.includes('mpegurl')) return 'videos';
+  if (lowerUrl.includes('.mpd') || lowerMime.includes('dash+xml')) return 'videos';
   if (lowerMime.startsWith('audio/') || /\.(mp3|aac|m4a|ogg|wav|opus)(\?.*)?$/i.test(lowerUrl)) return 'audio';
-  return 'video';
+  if (lowerMime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?.*)?$/i.test(lowerUrl)) return 'images';
+  if (/\.(zip|rar|7z|tar|gz|bz2|xz|iso)(\?.*)?$/i.test(lowerUrl)) return 'compressed';
+  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|epub)(\?.*)?$/i.test(lowerUrl)) return 'documents';
+  if (/\.(exe|msi|dmg|pkg|apk|deb|rpm)(\?.*)?$/i.test(lowerUrl)) return 'programs';
+  return 'videos';
+}
+
+// Clean chunk/temporary query parameters from video streams (e.g. YouTube videoplayback)
+function cleanStreamUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.pathname.includes('/videoplayback')) {
+      u.searchParams.delete('range');
+      u.searchParams.delete('rn');
+      u.searchParams.delete('rbuf');
+      return u.href;
+    }
+    return url;
+  } catch (_) {
+    return url;
+  }
+}
+
+function isMasterManifest(item) {
+  const url = (item.url || '').toLowerCase();
+  const mime = (item.mimeType || '').toLowerCase();
+  return url.includes('.m3u8') || mime.includes('mpegurl') || url.includes('.mpd') || mime.includes('dash+xml');
+}
+
+function isSegmentChunk(item) {
+  const url = (item.url || '').toLowerCase();
+  return /\.(ts|m4s|mp2t)(\?.*)?$/i.test(url);
 }
 
 // 1. Capture Outgoing Request Headers (Referer, Cookie, User-Agent, Origin, Authorization)
@@ -72,8 +105,9 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     if (details.requestHeaders) {
       for (const h of details.requestHeaders) {
         const name = h.name.toLowerCase();
-        // Capture important headers for deep video retrieval
-        if (['referer', 'user-agent', 'cookie', 'origin', 'authorization', 'range', 'sec-fetch-site'].includes(name)) {
+        // NEVER cache browser player 'range' headers!
+        // Stale partial player ranges cause CDNs to return HTTP 400 Bad Request or tiny snippets.
+        if (['referer', 'user-agent', 'cookie', 'origin', 'authorization', 'sec-fetch-site'].includes(name)) {
           headers[h.name] = h.value;
         }
       }
@@ -149,17 +183,20 @@ chrome.webRequest.onResponseStarted.addListener(
       } catch (_) {}
     }
 
-    const cachedHeaders = requestHeadersCache.get(details.url) || {};
+    const cleanedUrl = cleanStreamUrl(details.url);
+    const cachedHeaders = requestHeadersCache.get(details.url) || requestHeadersCache.get(cleanedUrl) || {};
     if (!cachedHeaders['Referer'] && tabUrl) {
       cachedHeaders['Referer'] = tabUrl;
     }
+    delete cachedHeaders['range'];
+    delete cachedHeaders['Range'];
 
-    const fileName = extractFileName(details.url, `${tabTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`);
-    const category = getMediaCategory(details.url, mimeType);
+    const fileName = extractFileName(cleanedUrl, `${tabTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`);
+    const category = getMediaCategory(cleanedUrl, mimeType);
 
     const mediaItem = {
-      id: `${details.tabId}_${details.url.substring(0, 100)}_${Date.now()}`,
-      url: details.url,
+      id: `${details.tabId}_${cleanedUrl.substring(0, 100)}_${Date.now()}`,
+      url: cleanedUrl,
       fileName: fileName,
       tabTitle: tabTitle,
       tabUrl: tabUrl,
@@ -176,20 +213,37 @@ chrome.webRequest.onResponseStarted.addListener(
   ['responseHeaders']
 );
 
-// Add detected media to in-memory store
+// Add detected media to in-memory store with priority for master playlists over tiny chunks
 function addMediaToTab(tabId, item) {
   if (!tabMediaStore.has(tabId)) {
     tabMediaStore.set(tabId, []);
   }
   const list = tabMediaStore.get(tabId);
+
   // Avoid duplicate URLs in same tab
-  const exists = list.some(m => m.url === item.url);
-  if (!exists) {
-    list.unshift(item);
-    // Limit list to 30 items per tab
-    if (list.length > 30) list.pop();
-    updateBadge(tabId, list.length);
+  const existsIndex = list.findIndex(m => m.url === item.url);
+  if (existsIndex !== -1) {
+    list[existsIndex] = { ...list[existsIndex], ...item };
+    return;
   }
+
+  // If this item is a chunk segment and the tab already has a master manifest, don't flood with segments
+  if (isSegmentChunk(item) && list.some(isMasterManifest)) {
+    return;
+  }
+
+  // If this item is a master manifest, place it at the top and clean out loose segments
+  if (isMasterManifest(item)) {
+    const withoutSegments = list.filter(m => !isSegmentChunk(m));
+    withoutSegments.unshift(item);
+    tabMediaStore.set(tabId, withoutSegments);
+    updateBadge(tabId, withoutSegments.length);
+    return;
+  }
+
+  list.unshift(item);
+  if (list.length > 30) list.pop();
+  updateBadge(tabId, list.length);
 }
 
 // Update extension action badge
@@ -216,57 +270,108 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 // 3. Intercept Browser Downloads (if enabled)
-chrome.downloads.onCreated.addListener(async (downloadItem) => {
+async function handleInterceptedDownload(downloadItem, suggestCallback) {
   const config = await getConfig();
-  if (!config.interceptDownloads) return;
+  if (!config.interceptDownloads) {
+    if (suggestCallback) suggestCallback();
+    return;
+  }
 
-  if (selfInitiatedDownloads.has(downloadItem.id)) {
-    selfInitiatedDownloads.delete(downloadItem.id);
+  const downloadId = downloadItem.id;
+  if (selfInitiatedDownloads.has(downloadId)) {
+    selfInitiatedDownloads.delete(downloadId);
+    if (suggestCallback) suggestCallback();
     return;
   }
 
   const downloadUrl = downloadItem.finalUrl || downloadItem.url;
-  if (!downloadUrl || downloadUrl.startsWith('data:') || downloadUrl.startsWith('blob:')) {
+  if (!downloadUrl || downloadUrl.startsWith('data:') || downloadUrl.startsWith('blob:') || downloadUrl.startsWith('file:')) {
+    if (suggestCallback) suggestCallback();
     return;
   }
 
-  // Cancel standard browser download
-  try {
-    await chrome.downloads.cancel(downloadItem.id);
-    await chrome.downloads.erase({ id: downloadItem.id });
-  } catch (_) {}
+  if (interceptedDownloadIds.has(downloadId)) {
+    if (suggestCallback) suggestCallback();
+    return;
+  }
+  interceptedDownloadIds.add(downloadId);
 
   // Gather headers
   const headers = requestHeadersCache.get(downloadUrl) || {};
   if (!headers['Referer'] && downloadItem.referrer) {
     headers['Referer'] = downloadItem.referrer;
   }
+  delete headers['range'];
+  delete headers['Range'];
 
-  const fileName = downloadItem.filename
+  let fileName = downloadItem.filename
     ? downloadItem.filename.split(/[/\\]/).pop()
     : extractFileName(downloadUrl, 'download.bin');
 
+  // Cancel standard browser download
+  try {
+    await chrome.downloads.cancel(downloadId);
+    await chrome.downloads.erase({ id: downloadId });
+  } catch (_) {}
+
   // Send to desktop app
-  await sendToDesktopApp({
+  const result = await sendToDesktopApp({
     url: downloadUrl,
     fileName: fileName,
     headers: headers,
     category: getMediaCategory(downloadUrl, downloadItem.mime)
   });
-});
+
+  // Fallback to browser download if desktop app is offline or failed so file is never lost!
+  if (!result || !result.success) {
+    chrome.downloads.download({
+      url: downloadUrl,
+      filename: fileName,
+      conflictAction: 'uniquify',
+      saveAs: false
+    }, (newId) => {
+      if (newId) {
+        selfInitiatedDownloads.add(newId);
+      }
+    });
+  }
+}
+
+// Prefer onDeterminingFilename to obtain the resolved filename from Content-Disposition/redirects
+if (chrome.downloads && chrome.downloads.onDeterminingFilename) {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    handleInterceptedDownload(item, suggest);
+    return true;
+  });
+} else if (chrome.downloads && chrome.downloads.onCreated) {
+  chrome.downloads.onCreated.addListener((item) => {
+    handleInterceptedDownload(item, null);
+  });
+}
 
 // 4. Send Download Task to Desktop VirusDownloader App
 async function sendToDesktopApp(payload) {
   let url = (payload.url || '').trim();
   if (url.startsWith('//')) {
     url = 'https:' + url;
+  } else if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('blob:') && !url.startsWith('data:')) {
+    if (url.includes('.') || url.includes('/')) {
+      url = 'https://' + url.replace(/^\/+/, '');
+    }
   }
+
+  url = cleanStreamUrl(url);
+
   if (!url || url.startsWith('blob:') || url.startsWith('data:')) {
     return {
       success: false,
-      error: 'Cannot download browser-internal blob/data stream directly. Please click the extension icon to select the sniffed media stream.'
+      error: 'Cannot download browser-internal blob/data stream directly. Please play the video for 2 seconds to capture the stream, then click Download.'
     };
   }
+
+  const headers = { ...(payload.headers || {}) };
+  delete headers['range'];
+  delete headers['Range'];
 
   const config = await getConfig();
   const targetUrl = `${config.serverUrl.replace(/\/$/, '')}/add`;
@@ -283,8 +388,8 @@ async function sendToDesktopApp(payload) {
       body: JSON.stringify({
         url: url,
         fileName: payload.fileName,
-        headers: payload.headers || {},
-        category: payload.category || 'other'
+        headers: headers,
+        category: payload.category || 'videos'
       }),
       signal: controller.signal
     });

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../../domain/models/download_task.dart';
+import '../services/ffmpeg_service.dart';
 import '../services/file_service.dart';
 import '../services/http_download_service.dart';
 import '../services/storage_service.dart';
@@ -15,6 +16,7 @@ class DownloadRepository extends ChangeNotifier {
   final StorageService storageService;
   final FileService fileService;
   final SettingsRepository settingsRepo;
+  final FfmpegService? ffmpegService;
 
   List<DownloadTask> _tasks = [];
   final Map<String, CancelToken> _activeTokens = {};
@@ -25,6 +27,7 @@ class DownloadRepository extends ChangeNotifier {
     required this.storageService,
     required this.fileService,
     required this.settingsRepo,
+    this.ffmpegService,
   });
 
   List<DownloadTask> get tasks => List.unmodifiable(_tasks);
@@ -45,14 +48,33 @@ class DownloadRepository extends ChangeNotifier {
     DownloadCategory? category,
     Map<String, String>? headers,
   }) async {
+    String resolvedFileName = fileName.trim();
+    final lowerUrl = url.toLowerCase();
+    final isStream = lowerUrl.contains('.m3u8') ||
+        resolvedFileName.toLowerCase().endsWith('.m3u8') ||
+        resolvedFileName.toLowerCase().endsWith('.ts');
+
+    // Convert .m3u8 or .ts stream targets to MKV container with subtitles support
+    if (isStream) {
+      if (resolvedFileName.toLowerCase().endsWith('.m3u8')) {
+        resolvedFileName = resolvedFileName.replaceAll(RegExp(r'\.m3u8$', caseSensitive: false), '.mkv');
+      } else if (resolvedFileName.toLowerCase().endsWith('.ts')) {
+        resolvedFileName = resolvedFileName.replaceAll(RegExp(r'\.ts$', caseSensitive: false), '.mkv');
+      } else if (!resolvedFileName.contains('.')) {
+        resolvedFileName = '$resolvedFileName.mkv';
+      }
+    }
+
     final uniqueSavePath =
-        await fileService.generateUniqueFilePath(targetDirectory, fileName);
-    final detectedCategory = category ?? AppUtils.categoryFromExtension(fileName);
+        await fileService.generateUniqueFilePath(targetDirectory, resolvedFileName);
+    final detectedCategory = isStream
+        ? DownloadCategory.videos
+        : (category ?? AppUtils.categoryFromExtension(resolvedFileName));
 
     final task = DownloadTask(
       id: _uuid.v4(),
       url: url.trim(),
-      fileName: fileName,
+      fileName: resolvedFileName,
       savePath: uniqueSavePath,
       totalBytes: 0,
       downloadedBytes: 0,
@@ -192,6 +214,17 @@ class DownloadRepository extends ChangeNotifier {
     }
   }
 
+  /// Cancels all active, queued, and paused downloads
+  Future<void> cancelAllActive() async {
+    for (final task in List.of(_tasks)) {
+      if (task.status == DownloadStatus.downloading ||
+          task.status == DownloadStatus.queued ||
+          task.status == DownloadStatus.paused) {
+        await cancelDownload(task.id);
+      }
+    }
+  }
+
   /// Checks the queue and launches tasks up to the concurrent limit
   void _processQueue() {
     final maxConcurrent = settingsRepo.currentSettings.maxConcurrentDownloads;
@@ -222,29 +255,58 @@ class DownloadRepository extends ChangeNotifier {
     );
     notifyListeners();
 
-    try {
-      await httpService.downloadFile(
-        url: task.url,
-        savePath: task.savePath,
-        cancelToken: cancelToken,
-        headers: task.headers,
-        onProgress: ({
-          required int downloadedBytes,
-          required int totalBytes,
-          required double speedBytesPerSec,
-        }) {
-          final idx = _tasks.indexWhere((t) => t.id == taskId);
-          if (idx == -1) return;
+    final isStream = task.url.toLowerCase().contains('.m3u8') ||
+        task.fileName.toLowerCase().endsWith('.m3u8') ||
+        (task.savePath.toLowerCase().endsWith('.mkv') && task.url.toLowerCase().contains('.m3u8'));
 
-          _tasks[idx] = _tasks[idx].copyWith(
-            downloadedBytes: downloadedBytes,
-            totalBytes: totalBytes > 0 ? totalBytes : _tasks[idx].totalBytes,
-            speedBytesPerSec: speedBytesPerSec,
-            status: DownloadStatus.downloading,
-          );
-          notifyListeners();
-        },
-      );
+    try {
+      if (isStream && ffmpegService != null) {
+        await ffmpegService!.downloadHlsStream(
+          m3u8Url: task.url,
+          savePath: task.savePath,
+          cancelToken: cancelToken,
+          headers: task.headers,
+          onProgress: ({
+            required int downloadedBytes,
+            required int totalBytes,
+            required double speedBytesPerSec,
+          }) {
+            final idx = _tasks.indexWhere((t) => t.id == taskId);
+            if (idx == -1) return;
+
+            _tasks[idx] = _tasks[idx].copyWith(
+              downloadedBytes: downloadedBytes,
+              totalBytes: totalBytes > 0 ? totalBytes : _tasks[idx].totalBytes,
+              speedBytesPerSec: speedBytesPerSec,
+              status: DownloadStatus.downloading,
+            );
+            notifyListeners();
+          },
+        );
+      } else {
+        await httpService.downloadFile(
+          url: task.url,
+          savePath: task.savePath,
+          cancelToken: cancelToken,
+          headers: task.headers,
+          onProgress: ({
+            required int downloadedBytes,
+            required int totalBytes,
+            required double speedBytesPerSec,
+          }) {
+            final idx = _tasks.indexWhere((t) => t.id == taskId);
+            if (idx == -1) return;
+
+            _tasks[idx] = _tasks[idx].copyWith(
+              downloadedBytes: downloadedBytes,
+              totalBytes: totalBytes > 0 ? totalBytes : _tasks[idx].totalBytes,
+              speedBytesPerSec: speedBytesPerSec,
+              status: DownloadStatus.downloading,
+            );
+            notifyListeners();
+          },
+        );
+      }
 
       // Successfully completed
       final completedIndex = _tasks.indexWhere((t) => t.id == taskId);
