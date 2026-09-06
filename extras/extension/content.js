@@ -27,7 +27,7 @@
       if (callback) {
         callback({
           success: false,
-          error: 'Extension was reloaded. Please refresh the page (F5).'
+          error: 'Extension reloaded. Please refresh page (F5).'
         });
       }
       return;
@@ -43,7 +43,7 @@
               observer.disconnect();
               observer = null;
             }
-            if (callback) callback({ success: false, error: 'Extension was reloaded. Please refresh the page (F5).' });
+            if (callback) callback({ success: false, error: 'Extension reloaded. Please refresh page (F5).' });
           } else {
             if (callback) callback({ success: false, error: msg });
           }
@@ -58,25 +58,19 @@
           observer.disconnect();
           observer = null;
         }
-        if (callback) callback({ success: false, error: 'Extension was reloaded. Please refresh the page (F5).' });
+        if (callback) callback({ success: false, error: 'Extension reloaded. Please refresh page (F5).' });
       } else {
         if (callback) callback({ success: false, error: msg });
       }
     }
   }
 
-  // Fetch initial config
-  chrome.runtime.sendMessage({ type: 'GET_CONFIG' }, (res) => {
-    if (res) config = res;
+  // Fetch initial config safely
   safeSendMessage({ type: 'GET_CONFIG' }, (res) => {
     if (res && res.showFloatingButton !== undefined) config = res;
     scanDomForMedia();
   });
 
-  // Listen for config changes
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.virusDownloaderConfig) {
-      config = changes.virusDownloaderConfig.newValue;
   // Listen for config changes safely
   try {
     if (chrome?.storage?.onChanged) {
@@ -86,7 +80,6 @@
         }
       });
     }
-  });
   } catch (_) {}
 
   function getCleanFileName(url, defaultBase) {
@@ -128,7 +121,6 @@
       }
     };
 
-    chrome.runtime.sendMessage({
     safeSendMessage({
       type: 'DOM_MEDIA_FOUND',
       items: [item]
@@ -200,7 +192,6 @@
 
       function doSend(url, fileName, headers, category) {
         badge.querySelector('span').innerText = 'Sending to VirusDownloader...';
-        chrome.runtime.sendMessage({
         safeSendMessage({
           type: 'SEND_TO_APP',
           payload: {
@@ -223,13 +214,11 @@
             }, 3000);
           } else {
             badge.classList.add('vd-btn-error');
-            badge.querySelector('span').innerText = (response && response.error) || 'Failed to connect';
             const err = (response && response.error) || 'Failed to connect';
             badge.querySelector('span').innerText = err;
             setTimeout(() => {
               badge.classList.remove('vd-btn-error');
               badge.querySelector('span').innerText = 'Download with VirusDownloader';
-            }, 4500);
             }, err.includes('refresh') ? 6000 : 4500);
           }
         });
@@ -237,7 +226,6 @@
 
       // If video is dynamic blob or empty, fetch sniffed media stream from background
       if (!targetUrl || targetUrl.startsWith('blob:') || targetUrl.startsWith('data:')) {
-        chrome.runtime.sendMessage({ type: 'GET_TAB_MEDIA' }, (res) => {
         safeSendMessage({ type: 'GET_TAB_MEDIA' }, (res) => {
           const media = (res && res.media) || [];
           if (media.length > 0) {
@@ -249,7 +237,6 @@
           } else {
             badge.classList.remove('vd-btn-loading');
             badge.classList.add('vd-btn-error');
-            badge.querySelector('span').innerText = 'Play video 2s to capture stream, then click';
             const err = (res && res.error) || 'Play video 2s to capture stream, then click';
             badge.querySelector('span').innerText = err;
             setTimeout(() => {
@@ -336,7 +323,6 @@
   }
 
   // MutationObserver for SPA navigation and dynamic video injection
-  const observer = new MutationObserver(() => {
   observer = new MutationObserver(() => {
     scanDomForMedia();
   });
@@ -346,7 +332,6 @@
     scanDomForMedia();
   } else {
     document.addEventListener('DOMContentLoaded', () => {
-      observer.observe(document.body, { childList: true, subtree: true });
       if (document.body && observer) {
         observer.observe(document.body, { childList: true, subtree: true });
       }
@@ -354,4 +339,3 @@
     });
   }
 })();
-
