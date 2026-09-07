@@ -79,6 +79,7 @@ class _HomePageState extends State<HomePage> {
           required String targetDirectory,
           DownloadCategory? category,
           Map<String, String>? headers,
+          bool? isResumable,
         }) {
           downloadsVm.addDownload(
             url: url,
@@ -86,6 +87,7 @@ class _HomePageState extends State<HomePage> {
             targetDirectory: targetDirectory,
             category: category,
             headers: headers,
+            isResumable: isResumable,
           );
         },
       ),
@@ -114,7 +116,10 @@ class _HomePageState extends State<HomePage> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
             onPressed: () {
               Navigator.of(ctx).pop();
               downloadsVm.remove(taskId, deleteFile: true);
@@ -130,6 +135,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final downloadsVm = context.watch<DownloadsViewModel>();
     final fileService = context.read<FileService>();
+    final httpService = context.read<HttpDownloadService>();
     final tasks = downloadsVm.tasks;
 
     return Scaffold(
@@ -173,12 +179,32 @@ class _HomePageState extends State<HomePage> {
                             key: ValueKey(task.id),
                             task: task,
                             fileService: fileService,
+                            httpService: httpService,
                             onPause: () => downloadsVm.pause(task.id),
                             onResume: () => downloadsVm.resume(task.id),
                             onCancel: () => downloadsVm.cancel(task.id),
                             onRetry: () => downloadsVm.retry(task.id),
                             onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
                             onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
+                            onChangeUrl: (newUrl, [headers, restartFromBeginning = false]) {
+                              downloadsVm.changeDownloadUrl(
+                                task.id,
+                                newUrl,
+                                headers: headers,
+                                restartFromBeginning: restartFromBeginning,
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    restartFromBeginning
+                                        ? 'Download restarted from beginning with new link for "${task.fileName}"'
+                                        : 'Download link updated for "${task.fileName}"',
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
                           );
                         },
                       ),

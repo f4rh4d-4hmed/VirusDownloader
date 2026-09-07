@@ -15,6 +15,7 @@ class DownloadTask {
   final DateTime? dateCompleted;
   final String? errorMessage;
   final Map<String, String>? headers;
+  final bool isResumable;
 
   const DownloadTask({
     required this.id,
@@ -30,6 +31,7 @@ class DownloadTask {
     this.dateCompleted,
     this.errorMessage,
     this.headers,
+    this.isResumable = true,
   });
 
   double get progress {
@@ -72,6 +74,7 @@ class DownloadTask {
     String? errorMessage,
     bool clearError = false,
     Map<String, String>? headers,
+    bool? isResumable,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -87,6 +90,7 @@ class DownloadTask {
       dateCompleted: dateCompleted ?? this.dateCompleted,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       headers: headers ?? this.headers,
+      isResumable: isResumable ?? this.isResumable,
     );
   }
 }

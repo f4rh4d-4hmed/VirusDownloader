@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
@@ -33,6 +34,7 @@ class HttpDownloadService {
     required DownloadProgressCallback onProgress,
     bool allowResume = true,
     Map<String, String>? headers,
+    void Function({required bool isResumable})? onResumableChecked,
   }) async {
     final file = File(savePath);
     int existingBytes = 0;
@@ -75,6 +77,21 @@ class HttpDownloadService {
 
     final statusCode = response.statusCode ?? 200;
     final isResumed = statusCode == 206;
+
+    // Detect if the server actually supports resuming
+    final acceptRanges = response.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase();
+    final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+
+    bool isResumable = true;
+    if (acceptRanges == 'none') {
+      isResumable = false;
+    } else if (existingBytes > 0 && !isResumed) {
+      // Server ignored Range header and served the full body from 0
+      isResumable = false;
+    } else if (isResumed || acceptRanges == 'bytes' || contentRange != null) {
+      isResumable = true;
+    }
+    onResumableChecked?.call(isResumable: isResumable);
 
     // Calculate total content length
     int totalBytes = 0;
@@ -141,13 +158,15 @@ class HttpDownloadService {
     }
   }
 
-  /// Probes URL headers to retrieve file name and content length without full download
-  Future<({String? fileName, int totalBytes})> probeUrl(
+  /// Probes URL headers to retrieve file name, content length, and resumability without full download
+  Future<({String? fileName, int totalBytes, bool isResumable})> probeUrl(
     String url, {
     Map<String, String>? headers,
   }) async {
     try {
-      final reqHeaders = <String, dynamic>{};
+      final reqHeaders = <String, dynamic>{
+        'range': 'bytes=0-0',
+      };
       if (headers != null) {
         reqHeaders.addAll(headers);
       }
@@ -160,10 +179,23 @@ class HttpDownloadService {
       );
 
       int totalBytes = 0;
+      final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
       final contentLength = response.headers.value(HttpHeaders.contentLengthHeader);
-      if (contentLength != null) {
+      final acceptRanges = response.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase();
+
+      if (contentRange != null) {
+        final match = RegExp(r'/(\d+)').firstMatch(contentRange);
+        if (match != null) {
+          totalBytes = int.tryParse(match.group(1) ?? '') ?? 0;
+        }
+      } else if (contentLength != null) {
         totalBytes = int.tryParse(contentLength) ?? 0;
       }
+
+      final isResumable = response.statusCode == 206 ||
+          acceptRanges == 'bytes' ||
+          contentRange != null ||
+          (acceptRanges != 'none' && totalBytes > 0);
 
       String? fileName;
       final contentDisposition = response.headers.value('content-disposition');
@@ -175,10 +207,122 @@ class HttpDownloadService {
         }
       }
 
-      return (fileName: fileName, totalBytes: totalBytes);
+      return (fileName: fileName, totalBytes: totalBytes, isResumable: isResumable);
     } catch (e) {
       debugPrint('Error probing URL headers: $e');
-      return (fileName: null, totalBytes: 0);
+      return (fileName: null, totalBytes: 0, isResumable: true);
+    }
+  }
+
+  /// Verifies whether a new URL points to the same file as an existing partial file
+  /// by downloading a sample (up to 1 MB) and comparing it byte-by-byte with the local file on disk.
+  Future<({bool matches, String? reason, int? newTotalBytes})> verifySameFile({
+    required String newUrl,
+    required String savePath,
+    int? expectedTotalBytes,
+    Map<String, String>? headers,
+    int sampleSizeBytes = 1024 * 1024,
+  }) async {
+    final file = File(savePath);
+    bool exists = false;
+    try {
+      exists = file.existsSync();
+    } catch (_) {}
+    if (!exists) {
+      return (matches: true, reason: null, newTotalBytes: null);
+    }
+
+    final localLength = await file.length();
+    if (localLength == 0) {
+      return (matches: true, reason: null, newTotalBytes: null);
+    }
+
+    final bytesToSample = math.min(localLength, sampleSizeBytes);
+    final requestHeaders = <String, dynamic>{
+      'range': 'bytes=0-${bytesToSample - 1}',
+    };
+    if (headers != null) {
+      requestHeaders.addAll(headers);
+    }
+
+    try {
+      final response = await _dio.get<List<int>>(
+        newUrl,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: requestHeaders,
+          validateStatus: (status) => status != null && status >= 200 && status < 400,
+        ),
+      );
+
+      final statusCode = response.statusCode ?? 200;
+      if (statusCode != 206) {
+        return (
+          matches: false,
+          reason: 'The new server returned status $statusCode instead of 206 Partial Content (it may not support resuming).',
+          newTotalBytes: null,
+        );
+      }
+
+      final remoteBytes = response.data;
+      if (remoteBytes == null || remoteBytes.length != bytesToSample) {
+        return (
+          matches: false,
+          reason: 'Expected $bytesToSample bytes in sample, but received ${remoteBytes?.length ?? 0} bytes.',
+          newTotalBytes: null,
+        );
+      }
+
+      // Read local bytes to compare
+      final raf = await file.open(mode: FileMode.read);
+      List<int> localBytes;
+      try {
+        localBytes = await raf.read(bytesToSample);
+      } finally {
+        await raf.close();
+      }
+
+      if (!listEquals(localBytes, remoteBytes)) {
+        return (
+          matches: false,
+          reason: 'The first sample of data does not match the existing downloaded file.',
+          newTotalBytes: null,
+        );
+      }
+
+      // Check total size if content-range is present
+      int? newTotal;
+      final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+      if (contentRange != null) {
+        final match = RegExp(r'/(\d+)').firstMatch(contentRange);
+        if (match != null) {
+          newTotal = int.tryParse(match.group(1) ?? '');
+        }
+      }
+
+      if (expectedTotalBytes != null && expectedTotalBytes > 0 && newTotal != null && newTotal > 0) {
+        if (expectedTotalBytes != newTotal) {
+          return (
+            matches: false,
+            reason: 'File size mismatch: original file was $expectedTotalBytes bytes, but the new link is $newTotal bytes.',
+            newTotalBytes: newTotal,
+          );
+        }
+      }
+
+      return (matches: true, reason: null, newTotalBytes: newTotal);
+    } on DioException catch (e) {
+      return (
+        matches: false,
+        reason: e.message ?? 'Network error while verifying new link: $e',
+        newTotalBytes: null,
+      );
+    } catch (e) {
+      return (
+        matches: false,
+        reason: 'Error verifying link: $e',
+        newTotalBytes: null,
+      );
     }
   }
 }

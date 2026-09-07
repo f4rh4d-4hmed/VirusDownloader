@@ -123,5 +123,33 @@ void main() {
       expect(deserialized.headers?['User-Agent'], 'CustomUA/1.0');
       expect(deserialized.headers?['Cookie'], 'auth_token=secret_123');
     });
+
+    test('Serializes and deserializes isResumable flag correctly', () {
+      final taskResumable = DownloadTask(
+        id: 'resumable-1',
+        url: 'https://example.com/file.zip',
+        fileName: 'file.zip',
+        savePath: '/downloads/file.zip',
+        dateAdded: DateTime.now(),
+        isResumable: true,
+      );
+      final jsonResumable = DownloadTaskModel.toJson(taskResumable);
+      expect(jsonResumable['isResumable'], isTrue);
+      expect(DownloadTaskModel.fromJson(jsonResumable).isResumable, isTrue);
+
+      final taskUnresumable = taskResumable.copyWith(isResumable: false);
+      final jsonUnresumable = DownloadTaskModel.toJson(taskUnresumable);
+      expect(jsonUnresumable['isResumable'], isFalse);
+      expect(DownloadTaskModel.fromJson(jsonUnresumable).isResumable, isFalse);
+
+      // Backwards compatibility: defaults to true if missing in json
+      final jsonLegacy = {
+        'id': 'legacy-1',
+        'url': 'https://example.com/legacy.zip',
+        'fileName': 'legacy.zip',
+        'savePath': '/downloads/legacy.zip',
+      };
+      expect(DownloadTaskModel.fromJson(jsonLegacy).isResumable, isTrue);
+    });
   });
 }

@@ -15,6 +15,7 @@ Widget createTestWidget({
   VoidCallback? onRetry,
   VoidCallback? onRemove,
   VoidCallback? onDeleteFile,
+  void Function(String newUrl, [Map<String, String>? headers, bool restartFromBeginning])? onChangeUrl,
 }) {
   return MaterialApp(
     theme: ThemeData(
@@ -30,6 +31,7 @@ Widget createTestWidget({
         onRetry: onRetry ?? () {},
         onRemove: onRemove ?? () {},
         onDeleteFile: onDeleteFile ?? () {},
+        onChangeUrl: onChangeUrl,
       ),
     ),
   );
@@ -59,6 +61,7 @@ void main() {
       expect(find.text('Pause'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
       expect(find.text('Copy Download Link'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsOneWidget);
       expect(find.text('Restart Download'), findsOneWidget);
       expect(find.text('Remove from List'), findsOneWidget);
       expect(find.text('Delete from Disk'), findsOneWidget);
@@ -75,6 +78,7 @@ void main() {
       expect(find.text('Pause'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
       expect(find.text('Copy Download Link'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsOneWidget);
       expect(find.text('Remove from List'), findsOneWidget);
       expect(find.text('Delete from Disk'), findsOneWidget);
     });
@@ -90,6 +94,7 @@ void main() {
       expect(find.text('Pause'), findsOneWidget);
       expect(find.text('Cancel'), findsOneWidget);
       expect(find.text('Copy Download Link'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsOneWidget);
     });
 
     testWidgets('Triggers pause callback when selecting Pause from menu', (tester) async {
@@ -110,10 +115,42 @@ void main() {
       expect(pauseCalled, isTrue);
     });
 
-    testWidgets('Shows completed options for completed downloads', (tester) async {
+    testWidgets('Shows Change Download Link for paused resumable downloads', (tester) async {
+      final taskPaused = taskDownloading.copyWith(
+        status: DownloadStatus.paused,
+        isResumable: true,
+      );
+
+      await tester.pumpWidget(createTestWidget(task: taskPaused));
+
+      await tester.tap(find.text('test.mp4'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Resume'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsOneWidget);
+    });
+
+    testWidgets('Does NOT show Change Download Link for unresumable downloads', (tester) async {
+      final taskUnresumable = taskDownloading.copyWith(
+        isResumable: false,
+      );
+
+      await tester.pumpWidget(createTestWidget(task: taskUnresumable));
+
+      // Tap the 3-dot icon
+      await tester.tap(find.byIcon(Icons.more_vert_rounded));
+      await tester.pumpAndSettle();
+
+      // Verify Change Download Link is NOT present for unresumable download
+      expect(find.text('Copy Download Link'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsNothing);
+    });
+
+    testWidgets('Does NOT show Change Download Link for completed downloads', (tester) async {
       final taskCompleted = taskDownloading.copyWith(
         status: DownloadStatus.completed,
         downloadedBytes: 10000,
+        isResumable: true,
       );
 
       await tester.pumpWidget(createTestWidget(task: taskCompleted));
@@ -126,8 +163,45 @@ void main() {
       expect(find.text('Open File'), findsOneWidget);
       expect(find.text('Show in Folder'), findsOneWidget);
       expect(find.text('Copy Download Link'), findsOneWidget);
+      expect(find.text('Change Download Link'), findsNothing);
       expect(find.text('Remove from List'), findsOneWidget);
       expect(find.text('Delete from Disk'), findsOneWidget);
+    });
+
+    testWidgets('Opens Change Download Link dialog and triggers callback with new URL', (tester) async {
+      String? changedUrl;
+      await tester.pumpWidget(createTestWidget(
+        task: taskDownloading,
+        onChangeUrl: (newUrl, [headers, restartFromBeginning = false]) {
+          changedUrl = newUrl;
+        },
+      ));
+
+      // Open 3-dot menu
+      await tester.tap(find.byIcon(Icons.more_vert_rounded));
+      await tester.pumpAndSettle();
+
+      // Tap Change Download Link
+      await tester.tap(find.text('Change Download Link'));
+      await tester.pumpAndSettle();
+
+      // Verify dialog is open
+      expect(find.text('Change Download Link'), findsOneWidget);
+      expect(find.text('New Download URL'), findsOneWidget);
+
+      // Enter new URL
+      final urlField = find.byType(TextFormField).first;
+      await tester.enterText(urlField, 'https://mirror.example.com/updated_test.mp4');
+      await tester.pumpAndSettle();
+
+      // Click Change Link button
+      await tester.tap(find.widgetWithText(FilledButton, 'Change Link'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pumpAndSettle();
+
+      // Verify callback received new URL
+      expect(changedUrl, 'https://mirror.example.com/updated_test.mp4');
     });
   });
 }

@@ -19,6 +19,7 @@ class DownloadTaskModel {
       'dateCompleted': task.dateCompleted?.toIso8601String(),
       'errorMessage': task.errorMessage,
       'headers': task.headers,
+      'isResumable': task.isResumable,
     };
   }
 
@@ -60,6 +61,7 @@ class DownloadTaskModel {
           : null,
       errorMessage: json['errorMessage'] as String?,
       headers: headers,
+      isResumable: json['isResumable'] as bool? ?? true,
     );
   }
 }

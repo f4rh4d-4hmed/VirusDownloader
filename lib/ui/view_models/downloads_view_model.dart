@@ -184,6 +184,7 @@ class DownloadsViewModel extends ChangeNotifier {
     required String targetDirectory,
     DownloadCategory? category,
     Map<String, String>? headers,
+    bool? isResumable,
   }) {
     return repository.addTask(
       url: url,
@@ -191,6 +192,7 @@ class DownloadsViewModel extends ChangeNotifier {
       targetDirectory: targetDirectory,
       category: category,
       headers: headers,
+      isResumable: isResumable,
     );
   }
 
@@ -198,6 +200,18 @@ class DownloadsViewModel extends ChangeNotifier {
   Future<void> resume(String id) => repository.resumeDownload(id);
   Future<void> cancel(String id) => repository.cancelDownload(id);
   Future<void> retry(String id) => repository.retryDownload(id);
+  Future<void> changeDownloadUrl(
+    String id,
+    String newUrl, {
+    Map<String, String>? headers,
+    bool restartFromBeginning = false,
+  }) =>
+      repository.changeDownloadUrl(
+        id,
+        newUrl,
+        headers: headers,
+        restartFromBeginning: restartFromBeginning,
+      );
   Future<void> remove(String id, {bool deleteFile = false}) =>
       repository.removeTask(id, deleteFileOnDisk: deleteFile);
 

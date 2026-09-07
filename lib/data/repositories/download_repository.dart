@@ -47,6 +47,7 @@ class DownloadRepository extends ChangeNotifier {
     required String targetDirectory,
     DownloadCategory? category,
     Map<String, String>? headers,
+    bool? isResumable,
   }) async {
     String resolvedFileName = fileName.trim();
     final lowerUrl = url.toLowerCase();
@@ -83,6 +84,7 @@ class DownloadRepository extends ChangeNotifier {
       speedBytesPerSec: 0.0,
       dateAdded: DateTime.now(),
       headers: headers,
+      isResumable: isStream ? false : (isResumable ?? true),
     );
 
     _tasks.insert(0, task);
@@ -170,6 +172,51 @@ class DownloadRepository extends ChangeNotifier {
     _persistTasks();
     notifyListeners();
     _processQueue();
+  }
+
+  /// Changes the download link for an active resumable download task
+  Future<void> changeDownloadUrl(
+    String id,
+    String newUrl, {
+    Map<String, String>? headers,
+    bool restartFromBeginning = false,
+  }) async {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+
+    final task = _tasks[index];
+    if (!task.isResumable && !restartFromBeginning) {
+      throw StateError('Cannot change download link for an unresumable download.');
+    }
+
+    final wasDownloading = task.status == DownloadStatus.downloading;
+    if (wasDownloading) {
+      final token = _activeTokens[id];
+      if (token != null && !token.isCancelled) {
+        token.cancel('Download link changed');
+        _activeTokens.remove(id);
+      }
+    }
+
+    if (restartFromBeginning) {
+      await fileService.deleteFile(task.savePath);
+    }
+
+    _tasks[index] = task.copyWith(
+      url: newUrl.trim(),
+      headers: headers ?? task.headers,
+      downloadedBytes: restartFromBeginning ? 0 : task.downloadedBytes,
+      speedBytesPerSec: 0.0,
+      clearError: true,
+      status: wasDownloading ? DownloadStatus.queued : task.status,
+    );
+
+    _persistTasks();
+    notifyListeners();
+
+    if (wasDownloading) {
+      _processQueue();
+    }
   }
 
   /// Removes task from the list and optionally deletes file on disk
@@ -289,6 +336,14 @@ class DownloadRepository extends ChangeNotifier {
           savePath: task.savePath,
           cancelToken: cancelToken,
           headers: task.headers,
+          onResumableChecked: ({required bool isResumable}) {
+            final idx = _tasks.indexWhere((t) => t.id == taskId);
+            if (idx != -1 && _tasks[idx].isResumable != isResumable) {
+              _tasks[idx] = _tasks[idx].copyWith(isResumable: isResumable);
+              _persistTasks();
+              notifyListeners();
+            }
+          },
           onProgress: ({
             required int downloadedBytes,
             required int totalBytes,

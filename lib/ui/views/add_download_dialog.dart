@@ -20,6 +20,7 @@ class AddDownloadDialog extends StatefulWidget {
     required String targetDirectory,
     DownloadCategory? category,
     Map<String, String>? headers,
+    bool? isResumable,
   }) onConfirm;
 
   const AddDownloadDialog({
@@ -48,6 +49,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
   DownloadCategory _selectedCategory = DownloadCategory.other;
   bool _isProbing = false;
   int _probedSize = 0;
+  bool _isResumable = true;
   bool _showAdvanced = false;
 
   @override
@@ -156,6 +158,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       }
       setState(() {
         _probedSize = info.totalBytes;
+        _isResumable = info.isResumable;
       });
     } catch (_) {} finally {
       if (mounted) {
@@ -193,6 +196,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       targetDirectory: _selectedDirectory,
       category: _selectedCategory,
       headers: _collectHeaders(),
+      isResumable: _isResumable,
     );
 
     Navigator.of(context).pop();
