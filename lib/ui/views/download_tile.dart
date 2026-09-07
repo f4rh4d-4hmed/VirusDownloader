@@ -20,6 +20,9 @@ class DownloadTile extends StatefulWidget {
   final FileService fileService;
   final HttpDownloadService? httpService;
   final FocusNode? focusNode;
+  final bool isSelected;
+  final void Function(bool isMultiSelect)? onSelect;
+  final VoidCallback? onOpen;
 
   const DownloadTile({
     super.key,
@@ -34,6 +37,9 @@ class DownloadTile extends StatefulWidget {
     required this.fileService,
     this.httpService,
     this.focusNode,
+    this.isSelected = false,
+    this.onSelect,
+    this.onOpen,
   });
 
   @override
@@ -436,6 +442,7 @@ class _DownloadTileState extends State<DownloadTile> {
 
     return Semantics(
       container: true,
+      selected: widget.isSelected,
       label: '${widget.task.fileName}, ${widget.task.status.name}',
       value: _buildSizeText(),
       hint: 'Press Shift+F10 for options',
@@ -453,15 +460,38 @@ class _DownloadTileState extends State<DownloadTile> {
               final isFocused = Focus.of(focusContext).hasFocus;
               return Container(
                 decoration: BoxDecoration(
-                  border: isFocused
-                      ? Border.all(color: theme.colorScheme.primary, width: 2)
+                  color: widget.isSelected
+                      ? theme.colorScheme.primaryContainer.withAlpha(80)
                       : null,
+                  border: widget.isSelected
+                      ? Border.all(color: theme.colorScheme.primary.withAlpha(180), width: 1.5)
+                      : (isFocused
+                          ? Border.all(color: theme.colorScheme.primary, width: 2)
+                          : null),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(8),
-                  onTap: widget.task.status == DownloadStatus.completed
-                      ? () => widget.fileService.openFile(widget.task.savePath)
+                  onTap: () {
+                    if (AppUtils.isDesktop) {
+                      final isMulti = HardwareKeyboard.instance.isControlPressed ||
+                          HardwareKeyboard.instance.isMetaPressed;
+                      widget.onSelect?.call(isMulti);
+                    } else {
+                      if (widget.task.status == DownloadStatus.completed) {
+                        widget.fileService.openFile(widget.task.savePath);
+                      }
+                    }
+                  },
+                  onDoubleTap: AppUtils.isDesktop &&
+                          widget.task.status == DownloadStatus.completed
+                      ? () {
+                          if (widget.onOpen != null) {
+                            widget.onOpen!();
+                          } else {
+                            widget.fileService.openFile(widget.task.savePath);
+                          }
+                        }
                       : null,
                   onTapDown: (details) {
                     _tapPosition = details.globalPosition;
@@ -471,6 +501,9 @@ class _DownloadTileState extends State<DownloadTile> {
                   },
                   onSecondaryTapUp: (details) {
                     _tapPosition = details.globalPosition;
+                    if (AppUtils.isDesktop && !widget.isSelected) {
+                      widget.onSelect?.call(false);
+                    }
                     _showOptionsMenu(context, details.globalPosition);
                   },
                   onLongPress: () {

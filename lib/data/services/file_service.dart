@@ -104,11 +104,28 @@ class FileService {
   Future<bool> openContainingFolder(String filePath) async {
     try {
       if (Platform.isWindows) {
-        final result = await Process.run('explorer.exe', ['/select,', p.normalize(filePath)]);
-        return result.exitCode == 0;
+        final file = File(filePath);
+        if (await file.exists()) {
+          final result = await Process.run('explorer.exe', ['/select,${p.normalize(filePath)}']);
+          return result.exitCode == 0;
+        } else {
+          final parentDir = p.dirname(filePath);
+          final dir = Directory(parentDir);
+          if (await dir.exists()) {
+            final result = await Process.run('explorer.exe', [p.normalize(parentDir)]);
+            return result.exitCode == 0;
+          }
+        }
       } else if (Platform.isMacOS) {
-        final result = await Process.run('open', ['-R', filePath]);
-        return result.exitCode == 0;
+        final file = File(filePath);
+        if (await file.exists()) {
+          final result = await Process.run('open', ['-R', filePath]);
+          return result.exitCode == 0;
+        } else {
+          final parentDir = p.dirname(filePath);
+          final result = await Process.run('open', [parentDir]);
+          return result.exitCode == 0;
+        }
       } else if (Platform.isLinux) {
         final parentDir = p.dirname(filePath);
         final result = await Process.run('xdg-open', [parentDir]);

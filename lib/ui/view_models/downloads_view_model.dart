@@ -31,6 +31,9 @@ class DownloadsViewModel extends ChangeNotifier {
   String get searchQuery => _searchQuery;
   SortOrder get sortOrder => _sortOrder;
 
+  // All Tasks (unfiltered)
+  List<DownloadTask> get allTasks => repository.tasks;
+
   // Filtered & Sorted Tasks
   List<DownloadTask> get tasks {
     var result = List<DownloadTask>.from(repository.tasks);
