@@ -6,7 +6,7 @@ import '../../core/utils.dart';
 import '../../data/services/file_service.dart';
 import '../../domain/models/download_task.dart';
 
-class DownloadTile extends StatelessWidget {
+class DownloadTile extends StatefulWidget {
   final DownloadTask task;
   final VoidCallback onPause;
   final VoidCallback onResume;
@@ -28,9 +28,16 @@ class DownloadTile extends StatelessWidget {
     required this.fileService,
   });
 
+  @override
+  State<DownloadTile> createState() => _DownloadTileState();
+}
+
+class _DownloadTileState extends State<DownloadTile> {
+  Offset _tapPosition = Offset.zero;
+
   Color _getStatusColor(BuildContext context) {
     final colors = Theme.of(context).extension<DownloadStatusColors>()!;
-    switch (task.status) {
+    switch (widget.task.status) {
       case DownloadStatus.downloading:
         return colors.downloading;
       case DownloadStatus.paused:
@@ -46,7 +53,7 @@ class DownloadTile extends StatelessWidget {
   }
 
   IconData _getStatusIcon() {
-    switch (task.status) {
+    switch (widget.task.status) {
       case DownloadStatus.downloading:
         return Icons.arrow_downward_rounded;
       case DownloadStatus.paused:
@@ -62,16 +69,215 @@ class DownloadTile extends StatelessWidget {
     }
   }
 
+  List<PopupMenuEntry<String>> _buildMenuItems(BuildContext context) {
+    final task = widget.task;
+    return [
+      if (task.status == DownloadStatus.downloading ||
+          task.status == DownloadStatus.queued) ...[
+        const PopupMenuItem(
+          value: 'pause',
+          child: Row(
+            children: [
+              Icon(Icons.pause_rounded, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Pause')),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'cancel',
+          child: Row(
+            children: [
+              Icon(Icons.cancel_outlined, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Cancel')),
+            ],
+          ),
+        ),
+      ] else if (task.status == DownloadStatus.paused) ...[
+        const PopupMenuItem(
+          value: 'resume',
+          child: Row(
+            children: [
+              Icon(Icons.play_arrow_rounded, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Resume')),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'cancel',
+          child: Row(
+            children: [
+              Icon(Icons.cancel_outlined, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Cancel')),
+            ],
+          ),
+        ),
+      ] else if (task.status == DownloadStatus.completed) ...[
+        const PopupMenuItem(
+          value: 'open_file',
+          child: Row(
+            children: [
+              Icon(Icons.file_open_outlined, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Open File')),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'open_folder',
+          child: Row(
+            children: [
+              Icon(Icons.folder_open_outlined, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Show in Folder')),
+            ],
+          ),
+        ),
+      ],
+      const PopupMenuItem(
+        value: 'copy_url',
+        child: Row(
+          children: [
+            Icon(Icons.copy_rounded, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Copy Download Link')),
+          ],
+        ),
+      ),
+      if (task.status != DownloadStatus.completed)
+        const PopupMenuItem(
+          value: 'retry',
+          child: Row(
+            children: [
+              Icon(Icons.replay_rounded, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('Restart Download')),
+            ],
+          ),
+        ),
+      const PopupMenuDivider(),
+      const PopupMenuItem(
+        value: 'remove_list',
+        child: Row(
+          children: [
+            Icon(Icons.delete_outline_rounded, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Remove from List')),
+          ],
+        ),
+      ),
+      const PopupMenuItem(
+        value: 'delete_disk',
+        child: Row(
+          children: [
+            Icon(Icons.delete_forever_rounded, size: 18, color: Colors.red),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Delete from Disk',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _showOptionsMenu(BuildContext context, [Offset? position]) async {
+    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+
+    Offset targetPosition = position ?? _tapPosition;
+
+    if (targetPosition == Offset.zero) {
+      final RenderBox? box = context.findRenderObject() as RenderBox?;
+      if (box != null && box.hasSize) {
+        targetPosition = box.localToGlobal(box.size.center(Offset.zero));
+      }
+    }
+
+    final RelativeRect relativeRect = RelativeRect.fromRect(
+      Rect.fromPoints(targetPosition, targetPosition),
+      Offset.zero & overlay.size,
+    );
+
+    final selected = await showMenu<String>(
+      context: context,
+      position: relativeRect,
+      items: _buildMenuItems(context),
+    );
+
+    if (selected != null && mounted) {
+      _handleMenuAction(this.context, selected);
+    }
+  }
+
+  void _handleMenuAction(BuildContext context, String action) {
+    switch (action) {
+      case 'pause':
+        widget.onPause();
+        break;
+      case 'resume':
+        widget.onResume();
+        break;
+      case 'cancel':
+        widget.onCancel();
+        break;
+      case 'open_file':
+        widget.fileService.openFile(widget.task.savePath);
+        break;
+      case 'open_folder':
+        widget.fileService.openContainingFolder(widget.task.savePath);
+        break;
+      case 'copy_url':
+        Clipboard.setData(ClipboardData(text: widget.task.url));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Download URL copied to clipboard'),
+            duration: Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        break;
+      case 'retry':
+        widget.onRetry();
+        break;
+      case 'remove_list':
+        widget.onRemove();
+        break;
+      case 'delete_disk':
+        widget.onDeleteFile();
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final statusColor = _getStatusColor(context);
-    final categoryIcon = AppUtils.getCategoryIcon(task.category);
+    final categoryIcon = AppUtils.getCategoryIcon(widget.task.category);
 
     return InkWell(
-      onTap: task.status == DownloadStatus.completed
-          ? () => fileService.openFile(task.savePath)
+      onTap: widget.task.status == DownloadStatus.completed
+          ? () => widget.fileService.openFile(widget.task.savePath)
           : null,
+      onTapDown: (details) {
+        _tapPosition = details.globalPosition;
+      },
+      onSecondaryTapDown: (details) {
+        _tapPosition = details.globalPosition;
+      },
+      onSecondaryTapUp: (details) {
+        _tapPosition = details.globalPosition;
+        _showOptionsMenu(context, details.globalPosition);
+      },
+      onLongPress: () {
+        _showOptionsMenu(context, _tapPosition);
+      },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
         child: Row(
@@ -129,7 +335,7 @@ class DownloadTile extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          task.fileName,
+                          widget.task.fileName,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -154,13 +360,13 @@ class DownloadTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                     child: SizedBox(
                       height: 4,
-                      child: task.isIndeterminate
+                      child: widget.task.isIndeterminate
                           ? LinearProgressIndicator(
                               valueColor: AlwaysStoppedAnimation(statusColor),
                               backgroundColor: theme.colorScheme.surfaceContainerHighest,
                             )
                           : LinearProgressIndicator(
-                              value: task.status == DownloadStatus.completed ? 1.0 : task.progress,
+                              value: widget.task.status == DownloadStatus.completed ? 1.0 : widget.task.progress,
                               valueColor: AlwaysStoppedAnimation(statusColor),
                               backgroundColor: theme.colorScheme.surfaceContainerHighest,
                             ),
@@ -176,7 +382,7 @@ class DownloadTile extends StatelessWidget {
                         child: Text(
                           _buildStatusSubline(),
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: task.status == DownloadStatus.failed
+                            color: widget.task.status == DownloadStatus.failed
                                 ? statusColor
                                 : theme.colorScheme.onSurfaceVariant,
                           ),
@@ -184,9 +390,9 @@ class DownloadTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (task.status == DownloadStatus.downloading && task.eta != null) ...[
+                      if (widget.task.status == DownloadStatus.downloading && widget.task.eta != null) ...[
                         Text(
-                          'ETA: ${task.formattedEta}',
+                          'ETA: ${widget.task.formattedEta}',
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -210,6 +416,7 @@ class DownloadTile extends StatelessWidget {
   }
 
   String _buildSizeText() {
+    final task = widget.task;
     if (task.status == DownloadStatus.completed) {
       return task.formattedTotalSize;
     }
@@ -224,6 +431,7 @@ class DownloadTile extends StatelessWidget {
   }
 
   String _buildStatusSubline() {
+    final task = widget.task;
     switch (task.status) {
       case DownloadStatus.downloading:
         return task.formattedSpeed;
@@ -241,6 +449,7 @@ class DownloadTile extends StatelessWidget {
   }
 
   Widget _buildActionButtons(BuildContext context) {
+    final task = widget.task;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -249,136 +458,40 @@ class DownloadTile extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.pause_rounded, size: 20),
             tooltip: 'Pause',
-            onPressed: onPause,
+            onPressed: widget.onPause,
             visualDensity: VisualDensity.compact,
           )
         else if (task.status == DownloadStatus.paused)
           IconButton(
             icon: const Icon(Icons.play_arrow_rounded, size: 20),
             tooltip: 'Resume',
-            onPressed: onResume,
+            onPressed: widget.onResume,
             visualDensity: VisualDensity.compact,
           )
         else if (task.status == DownloadStatus.failed || task.status == DownloadStatus.cancelled)
           IconButton(
             icon: const Icon(Icons.refresh_rounded, size: 20),
             tooltip: 'Retry',
-            onPressed: onRetry,
+            onPressed: widget.onRetry,
             visualDensity: VisualDensity.compact,
           )
         else if (task.status == DownloadStatus.completed)
           IconButton(
             icon: const Icon(Icons.folder_open_outlined, size: 20),
             tooltip: 'Open Folder',
-            onPressed: () => fileService.openContainingFolder(task.savePath),
+            onPressed: () => widget.fileService.openContainingFolder(task.savePath),
             visualDensity: VisualDensity.compact,
           ),
 
-        // Context Menu
+        // 3-dot Options Menu Button
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert_rounded, size: 20),
           tooltip: 'Options',
           padding: EdgeInsets.zero,
           onSelected: (value) => _handleMenuAction(context, value),
-          itemBuilder: (context) => [
-            if (task.status == DownloadStatus.completed) ...[
-              const PopupMenuItem(
-                value: 'open_file',
-                child: Row(
-                  children: [
-                    Icon(Icons.file_open_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Text('Open File'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'open_folder',
-                child: Row(
-                  children: [
-                    Icon(Icons.folder_open_outlined, size: 18),
-                    SizedBox(width: 10),
-                    Text('Show in Folder'),
-                  ],
-                ),
-              ),
-            ],
-            const PopupMenuItem(
-              value: 'copy_url',
-              child: Row(
-                children: [
-                  Icon(Icons.copy_rounded, size: 18),
-                  SizedBox(width: 10),
-                  Text('Copy Download Link'),
-                ],
-              ),
-            ),
-            if (task.status != DownloadStatus.completed)
-              const PopupMenuItem(
-                value: 'retry',
-                child: Row(
-                  children: [
-                    Icon(Icons.replay_rounded, size: 18),
-                    SizedBox(width: 10),
-                    Text('Restart Download'),
-                  ],
-                ),
-              ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: 'remove_list',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_outline_rounded, size: 18),
-                  SizedBox(width: 10),
-                  Text('Remove from List'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'delete_disk',
-              child: Row(
-                children: [
-                  Icon(Icons.delete_forever_rounded, size: 18, color: Colors.red),
-                  SizedBox(width: 10),
-                  Text('Delete from Disk', style: TextStyle(color: Colors.red)),
-                ],
-              ),
-            ),
-          ],
+          itemBuilder: (context) => _buildMenuItems(context),
         ),
       ],
     );
   }
-
-  void _handleMenuAction(BuildContext context, String action) {
-    switch (action) {
-      case 'open_file':
-        fileService.openFile(task.savePath);
-        break;
-      case 'open_folder':
-        fileService.openContainingFolder(task.savePath);
-        break;
-      case 'copy_url':
-        Clipboard.setData(ClipboardData(text: task.url));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Download URL copied to clipboard'),
-            duration: Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        break;
-      case 'retry':
-        onRetry();
-        break;
-      case 'remove_list':
-        onRemove();
-        break;
-      case 'delete_disk':
-        onDeleteFile();
-        break;
-    }
-  }
 }
-
