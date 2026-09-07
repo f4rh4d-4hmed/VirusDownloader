@@ -100,13 +100,19 @@ class DownloadRepository extends ChangeNotifier {
     final index = _tasks.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
+    final task = _tasks[index];
+    if (task.status != DownloadStatus.downloading &&
+        task.status != DownloadStatus.queued) {
+      return;
+    }
+
     final token = _activeTokens[id];
     if (token != null && !token.isCancelled) {
       token.cancel('User paused download');
       _activeTokens.remove(id);
     }
 
-    _tasks[index] = _tasks[index].copyWith(
+    _tasks[index] = task.copyWith(
       status: DownloadStatus.paused,
       speedBytesPerSec: 0.0,
     );
@@ -121,7 +127,14 @@ class DownloadRepository extends ChangeNotifier {
     final index = _tasks.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
-    _tasks[index] = _tasks[index].copyWith(
+    final task = _tasks[index];
+    if (task.status != DownloadStatus.paused &&
+        task.status != DownloadStatus.failed &&
+        task.status != DownloadStatus.cancelled) {
+      return;
+    }
+
+    _tasks[index] = task.copyWith(
       status: DownloadStatus.queued,
       speedBytesPerSec: 0.0,
       clearError: true,
@@ -138,6 +151,11 @@ class DownloadRepository extends ChangeNotifier {
     if (index == -1) return;
 
     final task = _tasks[index];
+    if (task.status == DownloadStatus.completed ||
+        task.status == DownloadStatus.cancelled) {
+      return;
+    }
+
     final token = _activeTokens[id];
     if (token != null && !token.isCancelled) {
       token.cancel('User cancelled download');
@@ -163,7 +181,13 @@ class DownloadRepository extends ChangeNotifier {
     final index = _tasks.indexWhere((t) => t.id == id);
     if (index == -1) return;
 
-    _tasks[index] = _tasks[index].copyWith(
+    final task = _tasks[index];
+    if (task.status == DownloadStatus.downloading ||
+        task.status == DownloadStatus.queued) {
+      return;
+    }
+
+    _tasks[index] = task.copyWith(
       status: DownloadStatus.queued,
       speedBytesPerSec: 0.0,
       clearError: true,
@@ -185,6 +209,9 @@ class DownloadRepository extends ChangeNotifier {
     if (index == -1) return;
 
     final task = _tasks[index];
+    if (task.status == DownloadStatus.completed) {
+      return;
+    }
     if (!task.isResumable && !restartFromBeginning) {
       throw StateError('Cannot change download link for an unresumable download.');
     }

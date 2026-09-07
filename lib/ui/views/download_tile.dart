@@ -40,8 +40,90 @@ class DownloadTile extends StatefulWidget {
   State<DownloadTile> createState() => _DownloadTileState();
 }
 
+class _MenuRouteTrackerEntry extends PopupMenuEntry<String> {
+  final ValueChanged<Route<dynamic>?> onRouteCaptured;
+
+  const _MenuRouteTrackerEntry({
+    required this.onRouteCaptured,
+  });
+
+  @override
+  double get height => 0.0;
+
+  @override
+  bool represents(String? value) => false;
+
+  @override
+  State<_MenuRouteTrackerEntry> createState() => _MenuRouteTrackerEntryState();
+}
+
+class _MenuRouteTrackerEntryState extends State<_MenuRouteTrackerEntry> {
+  Route<dynamic>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != _route) {
+      _route = route;
+      widget.onRouteCaptured(_route);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.onRouteCaptured(null);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox.shrink();
+  }
+}
+
 class _DownloadTileState extends State<DownloadTile> {
   Offset _tapPosition = Offset.zero;
+  Route<dynamic>? _activeMenuRoute;
+
+  void _closeMenuIfOpen() {
+    final route = _activeMenuRoute;
+    if (route != null && route.isActive) {
+      if (route.isCurrent) {
+        route.navigator?.pop();
+      } else {
+        route.navigator?.removeRoute(route);
+      }
+      _activeMenuRoute = null;
+    }
+  }
+
+  @override
+  void didUpdateWidget(DownloadTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.task.status != oldWidget.task.status) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _closeMenuIfOpen();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    final route = _activeMenuRoute;
+    if (route != null && route.isActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (route.isActive) {
+          if (route.isCurrent) {
+            route.navigator?.pop();
+          } else {
+            route.navigator?.removeRoute(route);
+          }
+        }
+      });
+    }
+    super.dispose();
+  }
 
   Color _getStatusColor(BuildContext context) {
     final colors = Theme.of(context).extension<DownloadStatusColors>()!;
@@ -85,6 +167,11 @@ class _DownloadTileState extends State<DownloadTile> {
     final canChangeLink = isActive && task.isResumable;
 
     return [
+      _MenuRouteTrackerEntry(
+        onRouteCaptured: (route) {
+          _activeMenuRoute = route;
+        },
+      ),
       if (task.status == DownloadStatus.downloading ||
           task.status == DownloadStatus.queued) ...[
         const PopupMenuItem(
@@ -239,6 +326,8 @@ class _DownloadTileState extends State<DownloadTile> {
       items: _buildMenuItems(context),
     );
 
+    _activeMenuRoute = null;
+
     if (selected != null && mounted) {
       _handleMenuAction(this.context, selected);
     }
@@ -247,16 +336,26 @@ class _DownloadTileState extends State<DownloadTile> {
   void _handleMenuAction(BuildContext context, String action) {
     switch (action) {
       case 'pause':
-        widget.onPause();
+        if (widget.task.status == DownloadStatus.downloading ||
+            widget.task.status == DownloadStatus.queued) {
+          widget.onPause();
+        }
         break;
       case 'resume':
-        widget.onResume();
+        if (widget.task.status == DownloadStatus.paused) {
+          widget.onResume();
+        }
         break;
       case 'cancel':
-        widget.onCancel();
+        if (widget.task.status != DownloadStatus.completed &&
+            widget.task.status != DownloadStatus.cancelled) {
+          widget.onCancel();
+        }
         break;
       case 'open_file':
-        widget.fileService.openFile(widget.task.savePath);
+        if (widget.task.status == DownloadStatus.completed) {
+          widget.fileService.openFile(widget.task.savePath);
+        }
         break;
       case 'open_folder':
         widget.fileService.openContainingFolder(widget.task.savePath);
@@ -272,10 +371,18 @@ class _DownloadTileState extends State<DownloadTile> {
         );
         break;
       case 'change_url':
-        _showChangeUrlDialog(context);
+        final isActive = widget.task.status == DownloadStatus.downloading ||
+            widget.task.status == DownloadStatus.queued ||
+            widget.task.status == DownloadStatus.paused;
+        if (isActive && widget.task.isResumable) {
+          _showChangeUrlDialog(context);
+        }
         break;
       case 'retry':
-        widget.onRetry();
+        if (widget.task.status != DownloadStatus.downloading &&
+            widget.task.status != DownloadStatus.queued) {
+          widget.onRetry();
+        }
         break;
       case 'remove_list':
         widget.onRemove();
@@ -637,7 +744,11 @@ class _DownloadTileState extends State<DownloadTile> {
           icon: const Icon(Icons.more_vert_rounded, size: 20),
           tooltip: 'More options for ${widget.task.fileName}',
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-          onSelected: (value) => _handleMenuAction(context, value),
+          onCanceled: () => _activeMenuRoute = null,
+          onSelected: (value) {
+            _activeMenuRoute = null;
+            _handleMenuAction(context, value);
+          },
           itemBuilder: (context) => _buildMenuItems(context),
         ),
       ],

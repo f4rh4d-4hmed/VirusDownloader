@@ -203,6 +203,140 @@ void main() {
       // Verify callback received new URL
       expect(changedUrl, 'https://mirror.example.com/updated_test.mp4');
     });
+
+    testWidgets('Context menu automatically dismisses when task status transitions from downloading to completed', (tester) async {
+      await tester.pumpWidget(
+        _TestStatusChangeHarness(
+          initialTask: taskDownloading,
+        ),
+      );
+      final harnessState = tester.state<_TestStatusChangeHarnessState>(find.byType(_TestStatusChangeHarness));
+
+      // Right-click to open options menu
+      await tester.tap(find.text('test.mp4'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+
+      // Verify menu is open
+      expect(find.text('Pause'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+
+      // Now update the task status to completed (download ended)
+      harnessState.updateTask(taskDownloading.copyWith(
+        status: DownloadStatus.completed,
+        downloadedBytes: 10000,
+      ));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Verify menu was automatically dismissed
+      expect(find.text('Pause'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
+    });
+
+    testWidgets('3-dot menu automatically dismisses when task status transitions to completed', (tester) async {
+      await tester.pumpWidget(
+        _TestStatusChangeHarness(
+          initialTask: taskDownloading,
+        ),
+      );
+      final harnessState = tester.state<_TestStatusChangeHarnessState>(find.byType(_TestStatusChangeHarness));
+
+      // Tap 3-dot icon to open menu
+      await tester.tap(find.byIcon(Icons.more_vert_rounded));
+      await tester.pumpAndSettle();
+
+      // Verify menu is open
+      expect(find.text('Pause'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+
+      // Update task to completed
+      harnessState.updateTask(taskDownloading.copyWith(
+        status: DownloadStatus.completed,
+        downloadedBytes: 10000,
+      ));
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Verify menu was automatically dismissed
+      expect(find.text('Pause'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
+    });
+
+    testWidgets('Guards menu actions against invalid task status', (tester) async {
+      bool pauseCalled = false;
+      bool cancelCalled = false;
+
+      final completedTask = taskDownloading.copyWith(
+        status: DownloadStatus.completed,
+        downloadedBytes: 10000,
+      );
+
+      await tester.pumpWidget(createTestWidget(
+        task: completedTask,
+        onPause: () => pauseCalled = true,
+        onCancel: () => cancelCalled = true,
+      ));
+
+      // Right-click to show menu for completed task
+      await tester.tap(find.text('test.mp4'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+
+      // Ensure completed options are present, and pause/cancel are not present
+      expect(find.text('Open File'), findsOneWidget);
+      expect(find.text('Show in Folder'), findsOneWidget);
+      expect(find.text('Pause'), findsNothing);
+      expect(find.text('Cancel'), findsNothing);
+      expect(pauseCalled, isFalse);
+      expect(cancelCalled, isFalse);
+    });
   });
+}
+
+class _TestStatusChangeHarness extends StatefulWidget {
+  final DownloadTask initialTask;
+
+  const _TestStatusChangeHarness({
+    required this.initialTask,
+  });
+
+  @override
+  State<_TestStatusChangeHarness> createState() => _TestStatusChangeHarnessState();
+}
+
+class _TestStatusChangeHarnessState extends State<_TestStatusChangeHarness> {
+  late DownloadTask task;
+
+  @override
+  void initState() {
+    super.initState();
+    task = widget.initialTask;
+  }
+
+  void updateTask(DownloadTask newTask) {
+    setState(() {
+      task = newTask;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      theme: ThemeData(
+        extensions: const [DownloadStatusColors.light],
+      ),
+      home: Scaffold(
+        body: DownloadTile(
+          task: task,
+          fileService: FileService(),
+          onPause: () {},
+          onResume: () {},
+          onCancel: () {},
+          onRetry: () {},
+          onRemove: () {},
+          onDeleteFile: () {},
+        ),
+      ),
+    );
+  }
 }
 
