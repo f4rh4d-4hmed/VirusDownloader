@@ -12,6 +12,11 @@ import 'http_download_service.dart';
 class FfmpegService {
   String? _cachedPath;
 
+  @visibleForTesting
+  void clearCache() {
+    _cachedPath = null;
+  }
+
   /// Returns the path to the ffmpeg executable if available, or null
   Future<String?> getFfmpegPath() async {
     if (_cachedPath != null && await File(_cachedPath!).exists()) {
@@ -77,7 +82,6 @@ class FfmpegService {
       } else if (Platform.isMacOS) {
         platformKey = 'macos-x64';
       } else if (Platform.isLinux) {
-        platformKey = 'linux-64';
         platformKey = 'linux-x64';
       } else {
         return null;
@@ -176,7 +180,6 @@ class FfmpegService {
       }
     }
 
-    final isMkv = savePath.toLowerCase().endsWith('.mkv');
     final args = <String>['-y'];
     if (headerList.isNotEmpty) {
       args.addAll(['-headers', headerList.join('')]);
@@ -196,10 +199,6 @@ class FfmpegService {
       'aac_adtstoasc',
       savePath,
     ]);
-    if (!isMkv) {
-      args.addAll(['-bsf:a', 'aac_adtstoasc']);
-    }
-    args.add(savePath);
 
     final process = await Process.start(ffmpegPath, args);
     if (onProcessStarted != null) {
