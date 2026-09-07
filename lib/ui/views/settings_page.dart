@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
@@ -28,10 +29,20 @@ class _SettingsPageState extends State<SettingsPage> {
     final settingsVm = context.watch<SettingsViewModel>();
     final settings = settingsVm.settings;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop();
+          }
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Settings'),
+          ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 800),
@@ -440,7 +451,9 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
     ),
-  );
+  ),
+),
+);
 }
 
   IconData _getBrowserIcon(String name) {

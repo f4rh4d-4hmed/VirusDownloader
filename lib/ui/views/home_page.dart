@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/enums.dart';
@@ -11,6 +12,7 @@ import '../view_models/settings_view_model.dart';
 import 'add_download_dialog.dart';
 import 'download_tile.dart';
 import 'empty_state.dart';
+import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
   final DownloadStatus? initialStatusFilter;
@@ -94,6 +96,14 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => const SettingsPage(),
+      ),
+    );
+  }
+
   void _confirmDeleteFile(BuildContext context, String taskId, String fileName) {
     final settings = context.read<SettingsViewModel>().settings;
     final downloadsVm = context.read<DownloadsViewModel>();
@@ -138,84 +148,92 @@ class _HomePageState extends State<HomePage> {
     final httpService = context.read<HttpDownloadService>();
     final tasks = downloadsVm.tasks;
 
-    return Scaffold(
-      body: SafeArea(
-        top: true,
-        bottom: false,
-        child: Column(
-          children: [
-            // Top Action Toolbar
-            _buildToolbar(context, downloadsVm),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.comma, control: true): () => _openSettings(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          body: SafeArea(
+            top: true,
+            bottom: false,
+            child: Column(
+              children: [
+                // Top Action Toolbar
+                _buildToolbar(context, downloadsVm),
 
-            // Horizontal Filter Chips Bar (FDM Style)
-            _buildFilterChipsBar(context, downloadsVm),
+                // Horizontal Filter Chips Bar (FDM Style)
+                _buildFilterChipsBar(context, downloadsVm),
 
-            const Divider(height: 1),
+                const Divider(height: 1),
 
-            // Main Download List Area
-            Expanded(
-              child: tasks.isEmpty
-                  ? EmptyState(
-                      onAddDownload: () => _openAddDownloadDialog(context),
-                      filterMessage: downloadsVm.searchQuery.isNotEmpty
-                          ? 'No downloads match "${downloadsVm.searchQuery}"'
-                          : (downloadsVm.categoryFilter != DownloadCategory.all ||
-                                  downloadsVm.statusFilter != null
-                              ? 'No downloads match the selected filters'
-                              : null),
-                    )
-                  : Scrollbar(
-                      controller: _listScrollController,
-                      thumbVisibility: true,
-                      interactive: true,
-                      child: ListView.separated(
-                        controller: _listScrollController,
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        itemCount: tasks.length,
-                        separatorBuilder: (context, index) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final task = tasks[index];
-                          return DownloadTile(
-                            key: ValueKey(task.id),
-                            task: task,
-                            fileService: fileService,
-                            httpService: httpService,
-                            onPause: () => downloadsVm.pause(task.id),
-                            onResume: () => downloadsVm.resume(task.id),
-                            onCancel: () => downloadsVm.cancel(task.id),
-                            onRetry: () => downloadsVm.retry(task.id),
-                            onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
-                            onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
-                            onChangeUrl: (newUrl, [headers, restartFromBeginning = false]) {
-                              downloadsVm.changeDownloadUrl(
-                                task.id,
-                                newUrl,
-                                headers: headers,
-                                restartFromBeginning: restartFromBeginning,
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    restartFromBeginning
-                                        ? 'Download restarted from beginning with new link for "${task.fileName}"'
-                                        : 'Download link updated for "${task.fileName}"',
-                                  ),
-                                  duration: const Duration(seconds: 2),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
+                // Main Download List Area
+                Expanded(
+                  child: tasks.isEmpty
+                      ? EmptyState(
+                          onAddDownload: () => _openAddDownloadDialog(context),
+                          filterMessage: downloadsVm.searchQuery.isNotEmpty
+                              ? 'No downloads match "${downloadsVm.searchQuery}"'
+                              : (downloadsVm.categoryFilter != DownloadCategory.all ||
+                                      downloadsVm.statusFilter != null
+                                  ? 'No downloads match the selected filters'
+                                  : null),
+                        )
+                      : Scrollbar(
+                          controller: _listScrollController,
+                          thumbVisibility: true,
+                          interactive: true,
+                          child: ListView.separated(
+                            controller: _listScrollController,
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            itemCount: tasks.length,
+                            separatorBuilder: (context, index) => const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final task = tasks[index];
+                              return DownloadTile(
+                                key: ValueKey(task.id),
+                                task: task,
+                                fileService: fileService,
+                                httpService: httpService,
+                                onPause: () => downloadsVm.pause(task.id),
+                                onResume: () => downloadsVm.resume(task.id),
+                                onCancel: () => downloadsVm.cancel(task.id),
+                                onRetry: () => downloadsVm.retry(task.id),
+                                onRemove: () => downloadsVm.remove(task.id, deleteFile: false),
+                                onDeleteFile: () => _confirmDeleteFile(context, task.id, task.fileName),
+                                onChangeUrl: (newUrl, [headers, restartFromBeginning = false]) {
+                                  downloadsVm.changeDownloadUrl(
+                                    task.id,
+                                    newUrl,
+                                    headers: headers,
+                                    restartFromBeginning: restartFromBeginning,
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        restartFromBeginning
+                                            ? 'Download restarted from beginning with new link for "${task.fileName}"'
+                                            : 'Download link updated for "${task.fileName}"',
+                                      ),
+                                      duration: const Duration(seconds: 2),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                },
                               );
                             },
-                          );
-                        },
-                      ),
-                    ),
+                          ),
+                        ),
+                ),
+
+                const Divider(height: 1),
+
+                // Bottom Status Bar
+                _buildStatusBar(context, downloadsVm),
+              ],
             ),
-
-            const Divider(height: 1),
-
-            // Bottom Status Bar
-            _buildStatusBar(context, downloadsVm),
-          ],
+          ),
         ),
       ),
     );
@@ -226,8 +244,6 @@ class _HomePageState extends State<HomePage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 550;
-
         if (_showSearch) {
           return Container(
             padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -276,6 +292,12 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(width: 8),
                 _buildSortButton(vm),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined),
+                  tooltip: 'Settings',
+                  onPressed: () => _openSettings(context),
+                ),
               ],
             ),
           );
@@ -288,47 +310,43 @@ class _HomePageState extends State<HomePage> {
           ),
           child: Row(
             children: [
-              Text(
-                'Downloads',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Add URL Button
-              FilledButton.icon(
+              // Add URL Button (Square, Icon-only)
+              IconButton.filled(
                 onPressed: () => _openAddDownloadDialog(context),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add URL'),
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                icon: const Icon(Icons.add_rounded, size: 20),
+                tooltip: 'Add URL',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
                 ),
               ),
+              const SizedBox(width: 8),
 
-              if (isWide) ...[
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
-                  icon: const Icon(Icons.pause_rounded, size: 16),
-                  label: const Text('Pause All'),
-                  style: OutlinedButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  ),
+              // Pause All Button (Square, Icon-only)
+              IconButton.outlined(
+                onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
+                icon: const Icon(Icons.pause_rounded, size: 18),
+                tooltip: 'Pause All',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
                 ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () => vm.resumeAll(),
-                  icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                  label: const Text('Resume All'),
-                  style: OutlinedButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  ),
+              ),
+              const SizedBox(width: 8),
+
+              // Resume All Button (Square, Icon-only)
+              IconButton.outlined(
+                onPressed: () => vm.resumeAll(),
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                tooltip: 'Resume All',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
                 ),
-              ],
+              ),
 
               const Spacer(),
 
@@ -347,6 +365,15 @@ class _HomePageState extends State<HomePage> {
 
               // Sort Menu
               _buildSortButton(vm),
+
+              const SizedBox(width: 4),
+
+              // Settings Button
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings',
+                onPressed: () => _openSettings(context),
+              ),
             ],
           ),
         );

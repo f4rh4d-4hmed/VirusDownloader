@@ -72,11 +72,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (res && res.connected) {
         isAppConnected = true;
         statusDot.className = 'dot connected';
-        statusText.innerText = 'VirusDownloader Ready';
+        statusText.innerText = 'App Runnng';
       } else {
         isAppConnected = false;
         statusDot.className = 'dot error';
-        statusText.innerText = 'App Offline (Launch VirusDownloader)';
+        statusText.innerText = 'App Offline';
       }
     });
   }
