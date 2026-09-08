@@ -14,6 +14,8 @@ import 'add_download_dialog.dart';
 import 'change_download_link_dialog.dart';
 import 'download_tile.dart';
 import 'empty_state.dart';
+import 'hash_dialog.dart';
+import 'recheck_dialog.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -30,7 +32,62 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _listScrollController = ScrollController();
   final ScrollController _filterScrollController = ScrollController();
   final Set<String> _selectedTaskIds = <String>{};
+  final Set<String> _notifiedCompletedIds = <String>{};
+  bool _initialTaskScanDone = false;
   bool _showSearch = false;
+
+  void _checkCompletedTasks(List<DownloadTask> tasks, FileService fileService) {
+    if (!_initialTaskScanDone) {
+      _initialTaskScanDone = true;
+      for (final t in tasks) {
+        if (t.status == DownloadStatus.completed) {
+          _notifiedCompletedIds.add(t.id);
+        }
+      }
+      return;
+    }
+
+    for (final t in tasks) {
+      if (t.status == DownloadStatus.completed && !_notifiedCompletedIds.contains(t.id)) {
+        _notifiedCompletedIds.add(t.id);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showCompletionSnackBar(t, fileService);
+          }
+        });
+      }
+    }
+  }
+
+  void _showCompletionSnackBar(DownloadTask task, FileService fileService) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 6),
+        content: Semantics(
+          liveRegion: true,
+          child: Text(
+            '${task.fileName} — download completed',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        action: SnackBarAction(
+          label: AppUtils.isDesktop ? 'Show in Folder' : 'Open',
+          onPressed: () {
+            if (AppUtils.isDesktop) {
+              fileService.openContainingFolder(task.savePath);
+            } else {
+              fileService.openFile(task.savePath);
+            }
+          },
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -207,6 +264,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void _recheckSelected(List<DownloadTask> selectedTasks) {
+    if (selectedTasks.isEmpty) return;
+    RecheckDialog.show(context, selectedTasks.first);
+  }
+
+  void _hashSelected(List<DownloadTask> selectedTasks) {
+    if (selectedTasks.isEmpty) return;
+    HashDialog.show(context, selectedTasks.first);
+  }
+
   void _pauseSelected(List<DownloadTask> selectedTasks, DownloadsViewModel downloadsVm) {
     for (final task in selectedTasks) {
       if (task.status == DownloadStatus.downloading || task.status == DownloadStatus.queued) {
@@ -358,6 +425,7 @@ class _HomePageState extends State<HomePage> {
     final fileService = context.read<FileService>();
     final httpService = context.read<HttpDownloadService>();
     final tasks = downloadsVm.tasks;
+    _checkCompletedTasks(downloadsVm.allTasks, fileService);
 
     return CallbackShortcuts(
       bindings: {
@@ -465,10 +533,11 @@ class _HomePageState extends State<HomePage> {
                         ),
                 ),
 
-                const Divider(height: 1),
-
-                // Bottom Status Bar
-                _buildStatusBar(context, downloadsVm),
+                if (AppUtils.isDesktop) ...[
+                  const Divider(height: 1),
+                  // Bottom Status Bar
+                  _buildStatusBar(context, downloadsVm),
+                ],
               ],
             ),
           ),
@@ -477,9 +546,26 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildActionIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+    Color? color,
+  }) {
+    return IconButton.outlined(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18, color: color),
+      tooltip: tooltip,
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        minimumSize: const Size(36, 36),
+        fixedSize: const Size(36, 36),
+      ),
+    );
+  }
+
   Widget _buildToolbar(BuildContext context, DownloadsViewModel vm) {
     final theme = Theme.of(context);
-    final fileService = context.read<FileService>();
     final selectedTasks = vm.allTasks.where((t) => _selectedTaskIds.contains(t.id)).toList();
 
     final pauseTasks = selectedTasks.where((t) =>
@@ -500,306 +586,465 @@ class _HomePageState extends State<HomePage> {
             selectedTasks.first.status == DownloadStatus.paused ||
             selectedTasks.first.status == DownloadStatus.queued);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (_showSearch) {
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            decoration: BoxDecoration(color: theme.colorScheme.surface),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  tooltip: 'Back',
-                  onPressed: () {
-                    _searchController.clear();
-                    vm.setSearchQuery('');
-                    setState(() {
-                      _showSearch = false;
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'Search downloads by name or URL...',
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                              icon: const Icon(Icons.clear, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                                vm.setSearchQuery('');
-                                setState(() {});
-                              },
-                            )
-                          : null,
-                    ),
-                    onChanged: (val) {
-                      vm.setSearchQuery(val);
-                      setState(() {});
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildSortButton(vm),
-                const SizedBox(width: 4),
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined),
-                  tooltip: 'Settings',
-                  onPressed: () => _openSettings(context),
-                ),
-              ],
+    final canRecheck = selectedTasks.length == 1 &&
+        selectedTasks.first.status == DownloadStatus.completed &&
+        selectedTasks.first.isResumable;
+
+    final canHash = selectedTasks.length == 1 &&
+        selectedTasks.first.status == DownloadStatus.completed;
+
+    if (_showSearch) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+        decoration: BoxDecoration(color: theme.colorScheme.surface),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'Back',
+              onPressed: () {
+                _searchController.clear();
+                vm.setSearchQuery('');
+                setState(() {
+                  _showSearch = false;
+                });
+              },
             ),
-          );
-        }
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Add URL Button (Square, Icon-only)
-                      IconButton.filled(
-                        onPressed: () => _openAddDownloadDialog(context),
-                        icon: const Icon(Icons.add_rounded, size: 20),
-                        tooltip: 'Add URL',
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          minimumSize: const Size(36, 36),
-                          fixedSize: const Size(36, 36),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-
-                      // Pause All Button (Square, Icon-only)
-                      IconButton.outlined(
-                        onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
-                        icon: const Icon(Icons.pause_rounded, size: 18),
-                        tooltip: 'Pause All',
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          minimumSize: const Size(36, 36),
-                          fixedSize: const Size(36, 36),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-
-                      // Resume All Button (Square, Icon-only)
-                      IconButton.outlined(
-                        onPressed: () => vm.resumeAll(),
-                        icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                        tooltip: 'Resume All',
-                        style: IconButton.styleFrom(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          minimumSize: const Size(36, 36),
-                          fixedSize: const Size(36, 36),
-                        ),
-                      ),
-
-                      // --- FILE SPECIFIC SECTION ---
-                      if (selectedTasks.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        // "|" vertical divider line
-                        Container(
-                          height: 22,
-                          width: 1.5,
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        const SizedBox(width: 8),
-
-                        // Show in Folder / Open File Location icon
-                        IconButton.outlined(
-                          onPressed: () => _openSelectedFolder(selectedTasks, fileService),
-                          icon: const Icon(Icons.folder_open_outlined, size: 18),
-                          tooltip: selectedTasks.length == 1
-                              ? 'Show in Folder'
-                              : 'Show in Folder (${selectedTasks.length})',
-                          style: IconButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            minimumSize: const Size(36, 36),
-                            fixedSize: const Size(36, 36),
-                          ),
-                        ),
-
-                        // File specific Pause icon if downloading
-                        if (canPause) ...[
-                          const SizedBox(width: 8),
-                          IconButton.outlined(
-                            onPressed: () => _pauseSelected(selectedTasks, vm),
-                            icon: const Icon(Icons.pause_rounded, size: 18),
-                            tooltip: pauseTasks.length == 1 ? 'Pause' : 'Pause (${pauseTasks.length})',
-                            style: IconButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              minimumSize: const Size(36, 36),
-                              fixedSize: const Size(36, 36),
-                            ),
-                          ),
-                        ],
-
-                        // File specific Resume icon if paused
-                        if (canResume) ...[
-                          const SizedBox(width: 8),
-                          IconButton.outlined(
-                            onPressed: () => _resumeSelected(selectedTasks, vm),
-                            icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                            tooltip: resumeTasks.length == 1 ? 'Resume' : 'Resume (${resumeTasks.length})',
-                            style: IconButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              minimumSize: const Size(36, 36),
-                              fixedSize: const Size(36, 36),
-                            ),
-                          ),
-                        ],
-
-                        // Open File icon if completed
-                        if (canOpenFile) ...[
-                          const SizedBox(width: 8),
-                          IconButton.outlined(
-                            onPressed: () => _openSelectedFiles(selectedTasks, fileService),
-                            icon: const Icon(Icons.file_open_outlined, size: 18),
-                            tooltip: completedTasks.length == 1
-                                ? 'Open File'
-                                : 'Open Files (${completedTasks.length})',
-                            style: IconButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              minimumSize: const Size(36, 36),
-                              fixedSize: const Size(36, 36),
-                            ),
-                          ),
-                        ],
-
-                        // Restart / Retry icon if failed/cancelled
-                        if (canRetry) ...[
-                          const SizedBox(width: 8),
-                          IconButton.outlined(
-                            onPressed: () => _retrySelected(selectedTasks, vm),
-                            icon: const Icon(Icons.replay_rounded, size: 18),
-                            tooltip: retryTasks.length == 1 ? 'Restart Download' : 'Restart (${retryTasks.length})',
-                            style: IconButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              minimumSize: const Size(36, 36),
-                              fixedSize: const Size(36, 36),
-                            ),
-                          ),
-                        ],
-
-                        // Change Download Link icon if single resumable active task
-                        if (canChangeLink) ...[
-                          const SizedBox(width: 8),
-                          IconButton.outlined(
-                            onPressed: () => _openChangeUrlDialog(context, selectedTasks.first, vm),
-                            icon: const Icon(Icons.link_rounded, size: 18),
-                            tooltip: 'Change Download Link',
-                            style: IconButton.styleFrom(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              minimumSize: const Size(36, 36),
-                              fixedSize: const Size(36, 36),
-                            ),
-                          ),
-                        ],
-
-                        // Copy Link icon
-                        const SizedBox(width: 8),
-                        IconButton.outlined(
-                          onPressed: () => _copySelectedUrls(selectedTasks),
-                          icon: const Icon(Icons.copy_rounded, size: 18),
-                          tooltip: selectedTasks.length == 1 ? 'Copy Download Link' : 'Copy Download Links (${selectedTasks.length})',
-                          style: IconButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            minimumSize: const Size(36, 36),
-                            fixedSize: const Size(36, 36),
-                          ),
-                        ),
-
-                        // Remove from List icon
-                        const SizedBox(width: 8),
-                        IconButton.outlined(
-                          onPressed: () => _removeSelectedFromList(selectedTasks, vm),
-                          icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                          tooltip: selectedTasks.length == 1 ? 'Remove from List' : 'Remove (${selectedTasks.length}) from List',
-                          style: IconButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            minimumSize: const Size(36, 36),
-                            fixedSize: const Size(36, 36),
-                          ),
-                        ),
-
-                        // Delete from Disk icon
-                        const SizedBox(width: 8),
-                        IconButton.outlined(
-                          onPressed: () => _deleteSelectedFromDisk(context, selectedTasks),
-                          icon: Icon(Icons.delete_forever_rounded, size: 18, color: theme.colorScheme.error),
-                          tooltip: selectedTasks.length == 1 ? 'Delete from Disk' : 'Delete (${selectedTasks.length}) from Disk',
-                          style: IconButton.styleFrom(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            minimumSize: const Size(36, 36),
-                            fixedSize: const Size(36, 36),
-                          ),
-                        ),
-
-                        // Clear selection button
-                        const SizedBox(width: 8),
-                        IconButton(
-                          onPressed: () => setState(() => _selectedTaskIds.clear()),
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          tooltip: 'Clear selection (${selectedTasks.length})',
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size(32, 32),
-                            fixedSize: const Size(32, 32),
-                          ),
-                        ),
-                      ],
-                    ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search downloads by name or URL...',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
                   ),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            vm.setSearchQuery('');
+                            setState(() {});
+                          },
+                        )
+                      : null,
                 ),
-              ),
-
-              const SizedBox(width: 8),
-
-              // Search Button
-              IconButton(
-                icon: const Icon(Icons.search_rounded),
-                tooltip: 'Search',
-                onPressed: () {
-                  setState(() {
-                    _showSearch = true;
-                  });
+                onChanged: (val) {
+                  vm.setSearchQuery(val);
+                  setState(() {});
                 },
               ),
+            ),
+            const SizedBox(width: 8),
+            _buildSortButton(vm),
+            const SizedBox(width: 4),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Settings',
+              onPressed: () => _openSettings(context),
+            ),
+          ],
+        ),
+      );
+    }
 
-              const SizedBox(width: 4),
+    if (AppUtils.isMobile) {
+      return _buildMobileToolbar(
+        context,
+        vm,
+        selectedTasks,
+        canPause: canPause,
+        canResume: canResume,
+        canRetry: canRetry,
+        canOpenFile: canOpenFile,
+        canChangeLink: canChangeLink,
+        canRecheck: canRecheck,
+        canHash: canHash,
+      );
+    }
 
-              // Sort Menu
-              _buildSortButton(vm),
+    return _buildDesktopToolbar(
+      context,
+      vm,
+      selectedTasks,
+      canPause: canPause,
+      canResume: canResume,
+      canRetry: canRetry,
+      canOpenFile: canOpenFile,
+      canChangeLink: canChangeLink,
+      canRecheck: canRecheck,
+      canHash: canHash,
+    );
+  }
 
-              const SizedBox(width: 4),
+  Widget _buildMobileToolbar(
+    BuildContext context,
+    DownloadsViewModel vm,
+    List<DownloadTask> selectedTasks, {
+    required bool canPause,
+    required bool canResume,
+    required bool canRetry,
+    required bool canOpenFile,
+    required bool canChangeLink,
+    required bool canRecheck,
+    required bool canHash,
+  }) {
+    final theme = Theme.of(context);
+    final fileService = context.read<FileService>();
 
-              // Settings Button
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+          color: theme.colorScheme.surface,
+          child: Row(
+            children: [
+              // Swapped for one-handed use: Left has Settings, Sort, Search
               IconButton(
-                icon: const Icon(Icons.settings_outlined),
+                icon: const Icon(Icons.settings_outlined, size: 20),
                 tooltip: 'Settings',
                 onPressed: () => _openSettings(context),
               ),
+              const SizedBox(width: 4),
+              _buildSortButton(vm),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.search_rounded, size: 20),
+                tooltip: 'Search',
+                onPressed: () => setState(() => _showSearch = true),
+              ),
+
+              const Spacer(),
+
+              // Right side: Under the thumb for 1-handed use:
+              // Pause All Button
+              IconButton.outlined(
+                onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
+                icon: const Icon(Icons.pause_rounded, size: 18),
+                tooltip: 'Pause All',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Resume All Button
+              IconButton.outlined(
+                onPressed: () => vm.resumeAll(),
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                tooltip: 'Resume All',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Add URL Button (Filled, prominent)
+              IconButton.filled(
+                onPressed: () => _openAddDownloadDialog(context),
+                icon: const Icon(Icons.add_rounded, size: 20),
+                tooltip: 'Add URL',
+                style: IconButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size(36, 36),
+                  fixedSize: const Size(36, 36),
+                ),
+              ),
             ],
           ),
-        );
-      },
+        ),
+
+        // Contextual action bar on mobile when items are selected
+        if (selectedTasks.isNotEmpty) ...[
+          Container(
+            height: 48,
+            color: theme.colorScheme.surfaceContainerLow,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+              children: [
+                _buildActionIconButton(
+                  icon: Icons.folder_open_outlined,
+                  tooltip: 'Folder',
+                  onPressed: () => _openSelectedFolder(selectedTasks, fileService),
+                ),
+                const SizedBox(width: 6),
+                if (canPause) ...[
+                  _buildActionIconButton(
+                    icon: Icons.pause_rounded,
+                    tooltip: 'Pause',
+                    onPressed: () => _pauseSelected(selectedTasks, vm),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canResume) ...[
+                  _buildActionIconButton(
+                    icon: Icons.play_arrow_rounded,
+                    tooltip: 'Resume',
+                    onPressed: () => _resumeSelected(selectedTasks, vm),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canOpenFile) ...[
+                  _buildActionIconButton(
+                    icon: Icons.file_open_outlined,
+                    tooltip: 'Open',
+                    onPressed: () => _openSelectedFiles(selectedTasks, fileService),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canRetry) ...[
+                  _buildActionIconButton(
+                    icon: Icons.replay_rounded,
+                    tooltip: 'Restart',
+                    onPressed: () => _retrySelected(selectedTasks, vm),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canRecheck) ...[
+                  _buildActionIconButton(
+                    icon: Icons.verified_outlined,
+                    tooltip: 'Recheck',
+                    onPressed: () => _recheckSelected(selectedTasks),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canHash) ...[
+                  _buildActionIconButton(
+                    icon: Icons.fingerprint_rounded,
+                    tooltip: 'Hash',
+                    onPressed: () => _hashSelected(selectedTasks),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                if (canChangeLink) ...[
+                  _buildActionIconButton(
+                    icon: Icons.link_rounded,
+                    tooltip: 'Change Link',
+                    onPressed: () => _openChangeUrlDialog(context, selectedTasks.first, vm),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                _buildActionIconButton(
+                  icon: Icons.copy_rounded,
+                  tooltip: 'Copy Link',
+                  onPressed: () => _copySelectedUrls(selectedTasks),
+                ),
+                const SizedBox(width: 6),
+                _buildActionIconButton(
+                  icon: Icons.delete_outline_rounded,
+                  tooltip: 'Remove',
+                  onPressed: () => _removeSelectedFromList(selectedTasks, vm),
+                ),
+                const SizedBox(width: 6),
+                _buildActionIconButton(
+                  icon: Icons.delete_forever_rounded,
+                  tooltip: 'Delete',
+                  color: theme.colorScheme.error,
+                  onPressed: () => _deleteSelectedFromDisk(context, selectedTasks),
+                ),
+                const SizedBox(width: 6),
+                _buildActionIconButton(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Clear',
+                  onPressed: () => setState(() => _selectedTaskIds.clear()),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDesktopToolbar(
+    BuildContext context,
+    DownloadsViewModel vm,
+    List<DownloadTask> selectedTasks, {
+    required bool canPause,
+    required bool canResume,
+    required bool canRetry,
+    required bool canOpenFile,
+    required bool canChangeLink,
+    required bool canRecheck,
+    required bool canHash,
+  }) {
+    final theme = Theme.of(context);
+    final fileService = context.read<FileService>();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+      decoration: BoxDecoration(color: theme.colorScheme.surface),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Add URL Button
+                  IconButton.filled(
+                    onPressed: () => _openAddDownloadDialog(context),
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    tooltip: 'Add URL',
+                    style: IconButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      minimumSize: const Size(36, 36),
+                      fixedSize: const Size(36, 36),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Pause All Button
+                  IconButton.outlined(
+                    onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
+                    icon: const Icon(Icons.pause_rounded, size: 18),
+                    tooltip: 'Pause All',
+                    style: IconButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      minimumSize: const Size(36, 36),
+                      fixedSize: const Size(36, 36),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Resume All Button
+                  IconButton.outlined(
+                    onPressed: () => vm.resumeAll(),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    tooltip: 'Resume All',
+                    style: IconButton.styleFrom(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      minimumSize: const Size(36, 36),
+                      fixedSize: const Size(36, 36),
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+                  Container(
+                    height: 22,
+                    width: 1.5,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
+                  const SizedBox(width: 8),
+
+                  // Fixed-in-place Action Bar Buttons (File Explorer Style):
+                  // All buttons remain visible; unlocked/enabled based on selection!
+                  _buildActionIconButton(
+                    icon: Icons.folder_open_outlined,
+                    tooltip: 'Show in Folder',
+                    onPressed: selectedTasks.isNotEmpty ? () => _openSelectedFolder(selectedTasks, fileService) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.pause_rounded,
+                    tooltip: 'Pause',
+                    onPressed: canPause ? () => _pauseSelected(selectedTasks, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.play_arrow_rounded,
+                    tooltip: 'Resume',
+                    onPressed: canResume ? () => _resumeSelected(selectedTasks, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.file_open_outlined,
+                    tooltip: 'Open File',
+                    onPressed: canOpenFile ? () => _openSelectedFiles(selectedTasks, fileService) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.replay_rounded,
+                    tooltip: 'Restart Download',
+                    onPressed: canRetry ? () => _retrySelected(selectedTasks, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.verified_outlined,
+                    tooltip: 'Recheck File',
+                    onPressed: canRecheck ? () => _recheckSelected(selectedTasks) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.fingerprint_rounded,
+                    tooltip: 'File Hash',
+                    onPressed: canHash ? () => _hashSelected(selectedTasks) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.link_rounded,
+                    tooltip: 'Change Download Link',
+                    onPressed: canChangeLink ? () => _openChangeUrlDialog(context, selectedTasks.first, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.copy_rounded,
+                    tooltip: 'Copy Download Link',
+                    onPressed: selectedTasks.isNotEmpty ? () => _copySelectedUrls(selectedTasks) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: 'Remove from List',
+                    onPressed: selectedTasks.isNotEmpty ? () => _removeSelectedFromList(selectedTasks, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.delete_forever_rounded,
+                    tooltip: 'Delete from Disk',
+                    color: selectedTasks.isNotEmpty ? theme.colorScheme.error : null,
+                    onPressed: selectedTasks.isNotEmpty ? () => _deleteSelectedFromDisk(context, selectedTasks) : null,
+                  ),
+                  if (selectedTasks.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    IconButton(
+                      onPressed: () => setState(() => _selectedTaskIds.clear()),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      tooltip: 'Clear selection (${selectedTasks.length})',
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(32, 32),
+                        fixedSize: const Size(32, 32),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          // Search Button
+          IconButton(
+            icon: const Icon(Icons.search_rounded),
+            tooltip: 'Search',
+            onPressed: () => setState(() => _showSearch = true),
+          ),
+          const SizedBox(width: 4),
+
+          // Sort Menu
+          _buildSortButton(vm),
+          const SizedBox(width: 4),
+
+          // Settings Button
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () => _openSettings(context),
+          ),
+        ],
+      ),
     );
   }
 

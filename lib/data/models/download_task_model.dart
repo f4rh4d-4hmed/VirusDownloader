@@ -20,6 +20,8 @@ class DownloadTaskModel {
       'errorMessage': task.errorMessage,
       'headers': task.headers,
       'isResumable': task.isResumable,
+      'fileHash': task.fileHash,
+      'hashAlgorithm': task.hashAlgorithm?.name,
     };
   }
 
@@ -45,6 +47,14 @@ class DownloadTaskModel {
       );
     }
 
+    final hashAlgoName = json['hashAlgorithm'] as String?;
+    HashAlgorithm? hashAlgo;
+    if (hashAlgoName != null) {
+      try {
+        hashAlgo = HashAlgorithm.values.firstWhere((e) => e.name == hashAlgoName);
+      } catch (_) {}
+    }
+
     return DownloadTask(
       id: json['id'] as String,
       url: json['url'] as String,
@@ -62,7 +72,8 @@ class DownloadTaskModel {
       errorMessage: json['errorMessage'] as String?,
       headers: headers,
       isResumable: json['isResumable'] as bool? ?? true,
+      fileHash: json['fileHash'] as String?,
+      hashAlgorithm: hashAlgo,
     );
   }
 }
-

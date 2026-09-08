@@ -1,16 +1,28 @@
 import 'package:flutter/material.dart';
+import '../../core/enums.dart';
+import 'proxy_config.dart';
 
 class AppSettings {
   final String defaultSavePath;
   final int maxConcurrentDownloads;
   final ThemeMode themeMode;
   final bool confirmOnDelete;
+  final int defaultWorkerCount;
+  final bool usePlaceholderMode;
+  final SpeedLimitMode speedLimitMode;
+  final List<ProxyConfig> proxyServers;
+  final bool autoRecheckOnComplete;
 
   const AppSettings({
     this.defaultSavePath = '',
     this.maxConcurrentDownloads = 3,
     this.themeMode = ThemeMode.system,
     this.confirmOnDelete = true,
+    this.defaultWorkerCount = 1,
+    this.usePlaceholderMode = false,
+    this.speedLimitMode = SpeedLimitMode.unlimited,
+    this.proxyServers = const [],
+    this.autoRecheckOnComplete = false,
   });
 
   AppSettings copyWith({
@@ -18,13 +30,22 @@ class AppSettings {
     int? maxConcurrentDownloads,
     ThemeMode? themeMode,
     bool? confirmOnDelete,
+    int? defaultWorkerCount,
+    bool? usePlaceholderMode,
+    SpeedLimitMode? speedLimitMode,
+    List<ProxyConfig>? proxyServers,
+    bool? autoRecheckOnComplete,
   }) {
     return AppSettings(
       defaultSavePath: defaultSavePath ?? this.defaultSavePath,
       maxConcurrentDownloads: maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       themeMode: themeMode ?? this.themeMode,
       confirmOnDelete: confirmOnDelete ?? this.confirmOnDelete,
+      defaultWorkerCount: defaultWorkerCount ?? this.defaultWorkerCount,
+      usePlaceholderMode: usePlaceholderMode ?? this.usePlaceholderMode,
+      speedLimitMode: speedLimitMode ?? this.speedLimitMode,
+      proxyServers: proxyServers ?? this.proxyServers,
+      autoRecheckOnComplete: autoRecheckOnComplete ?? this.autoRecheckOnComplete,
     );
   }
 }
-

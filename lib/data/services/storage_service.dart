@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants.dart';
+import '../../core/enums.dart';
 import '../../domain/models/app_settings.dart';
 import '../../domain/models/download_task.dart';
+import '../../domain/models/proxy_config.dart';
 import '../models/download_task_model.dart';
 
 class StorageService {
@@ -59,11 +61,29 @@ class StorageService {
           ? ThemeMode.values[themeIndex]
           : ThemeMode.system;
 
+      final speedIndex = data['speedLimitMode'] as int? ?? SpeedLimitMode.unlimited.index;
+      final speedLimitMode = (speedIndex >= 0 && speedIndex < SpeedLimitMode.values.length)
+          ? SpeedLimitMode.values[speedIndex]
+          : SpeedLimitMode.unlimited;
+
+      List<ProxyConfig> proxyServers = [];
+      if (data['proxyServers'] is List) {
+        proxyServers = (data['proxyServers'] as List)
+            .whereType<Map<String, dynamic>>()
+            .map(ProxyConfig.fromJson)
+            .toList();
+      }
+
       return AppSettings(
         defaultSavePath: data['defaultSavePath'] as String? ?? '',
         maxConcurrentDownloads: data['maxConcurrentDownloads'] as int? ?? 3,
         themeMode: themeMode,
         confirmOnDelete: data['confirmOnDelete'] as bool? ?? true,
+        defaultWorkerCount: data['defaultWorkerCount'] as int? ?? 1,
+        usePlaceholderMode: data['usePlaceholderMode'] as bool? ?? false,
+        speedLimitMode: speedLimitMode,
+        proxyServers: proxyServers,
+        autoRecheckOnComplete: data['autoRecheckOnComplete'] as bool? ?? false,
       );
     } catch (_) {
       return const AppSettings();
@@ -78,8 +98,12 @@ class StorageService {
       'maxConcurrentDownloads': settings.maxConcurrentDownloads,
       'themeMode': settings.themeMode.index,
       'confirmOnDelete': settings.confirmOnDelete,
+      'defaultWorkerCount': settings.defaultWorkerCount,
+      'usePlaceholderMode': settings.usePlaceholderMode,
+      'speedLimitMode': settings.speedLimitMode.index,
+      'proxyServers': settings.proxyServers.map((p) => p.toJson()).toList(),
+      'autoRecheckOnComplete': settings.autoRecheckOnComplete,
     };
     await prefs.setString(AppConstants.storageKeySettings, jsonEncode(data));
   }
 }
-

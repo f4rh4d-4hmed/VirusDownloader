@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
+import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../view_models/settings_view_model.dart';
+import 'proxy_settings_section.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -88,21 +90,22 @@ class _SettingsPageState extends State<SettingsPage> {
                         ],
                       ),
                       SegmentedButton<ThemeMode>(
+                        showSelectedIcon: false,
                         segments: const [
                           ButtonSegment(
                             value: ThemeMode.system,
                             icon: Icon(Icons.brightness_auto_outlined),
-                            label: Text('System'),
+                            tooltip: 'System',
                           ),
                           ButtonSegment(
                             value: ThemeMode.light,
                             icon: Icon(Icons.light_mode_outlined),
-                            label: Text('Light'),
+                            tooltip: 'Light',
                           ),
                           ButtonSegment(
                             value: ThemeMode.dark,
                             icon: Icon(Icons.dark_mode_outlined),
-                            label: Text('Dark'),
+                            tooltip: 'Dark',
                           ),
                         ],
                         selected: {settings.themeMode},
@@ -158,9 +161,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Max concurrent downloads
                     ListTile(
-                      leading: const Icon(Icons.speed_outlined),
+                      leading: const Icon(Icons.queue_outlined),
                       title: const Text('Max Concurrent Downloads'),
-                      subtitle: const Text('Limit active simultaneous downloads'),
+                      subtitle: const Text('Limit active simultaneous download tasks'),
                       trailing: DropdownButton<int>(
                         value: settings.maxConcurrentDownloads,
                         underline: const SizedBox(),
@@ -178,6 +181,83 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const Divider(),
+                    // Per-file worker concurrency
+                    ListTile(
+                      leading: const Icon(Icons.layers_outlined),
+                      title: const Text('Download Parts / Workers per File'),
+                      subtitle: const Text('Split each file into parallel parts to maximize speed'),
+                      trailing: DropdownButton<int>(
+                        value: settings.defaultWorkerCount,
+                        underline: const SizedBox(),
+                        items: [1, 2, 4, 6, 8, 12, 16].map((parts) {
+                          return DropdownMenuItem(
+                            value: parts,
+                            child: Text(parts == 1 ? '1 part (Single)' : '$parts parts'),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            settingsVm.updateWorkerCount(val);
+                          }
+                        },
+                      ),
+                    ),
+                    const Divider(),
+                    // Speed limit mode
+                    ListTile(
+                      leading: const Icon(Icons.speed_outlined),
+                      title: const Text('Speed Limiter Mode'),
+                      subtitle: Text(settings.speedLimitMode == SpeedLimitMode.rocket
+                          ? 'Accelerate by distributing parts across proxy servers'
+                          : 'Throttle or uncap bandwidth per task'),
+                      trailing: DropdownButton<SpeedLimitMode>(
+                        value: settings.speedLimitMode,
+                        underline: const SizedBox(),
+                        items: SpeedLimitMode.values.map((mode) {
+                          return DropdownMenuItem(
+                            value: mode,
+                            child: Text(mode.label),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            if (val == SpeedLimitMode.rocket && settings.proxyServers.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Rocket Mode requires at least one proxy server added below.'),
+                                  duration: Duration(seconds: 3),
+                                ),
+                              );
+                              return;
+                            }
+                            settingsVm.updateSpeedLimitMode(val);
+                          }
+                        },
+                      ),
+                    ),
+                    const Divider(),
+                    // Placeholder pre-allocation
+                    SwitchListTile(
+                      secondary: const Icon(Icons.note_add_outlined),
+                      title: const Text('Placeholder File Mode'),
+                      subtitle: const Text('Pre-allocates file space with zeros for fast resume (resumable links only)'),
+                      value: settings.usePlaceholderMode,
+                      onChanged: (val) {
+                        settingsVm.updatePlaceholderMode(val);
+                      },
+                    ),
+                    const Divider(),
+                    // Auto-recheck
+                    SwitchListTile(
+                      secondary: const Icon(Icons.verified_outlined),
+                      title: const Text('Auto-Recheck on Completion'),
+                      subtitle: const Text('Automatically verify file integrity when a download finishes'),
+                      value: settings.autoRecheckOnComplete,
+                      onChanged: (val) {
+                        settingsVm.updateAutoRecheck(val);
+                      },
+                    ),
+                    const Divider(),
                     // Confirm before deleting file
                     SwitchListTile(
                       secondary: const Icon(Icons.delete_sweep_outlined),
@@ -191,6 +271,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
               ),
+
+              const SizedBox(height: 28),
+
+              // Proxy & Acceleration Section
+              Text(
+                'Proxy & Acceleration',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const ProxySettingsSection(),
 
               const SizedBox(height: 28),
 

@@ -7,6 +7,8 @@ import '../../data/services/file_service.dart';
 import '../../data/services/http_download_service.dart';
 import '../../domain/models/download_task.dart';
 import 'change_download_link_dialog.dart';
+import 'hash_dialog.dart';
+import 'recheck_dialog.dart';
 
 class DownloadTile extends StatefulWidget {
   final DownloadTask task;
@@ -91,6 +93,7 @@ class _MenuRouteTrackerEntryState extends State<_MenuRouteTrackerEntry> {
 class _DownloadTileState extends State<DownloadTile> {
   Offset _tapPosition = Offset.zero;
   Route<dynamic>? _activeMenuRoute;
+  int _lastTapTime = 0;
 
   void _closeMenuIfOpen() {
     final route = _activeMenuRoute;
@@ -242,6 +245,27 @@ class _DownloadTileState extends State<DownloadTile> {
             ],
           ),
         ),
+        if (task.isResumable)
+          const PopupMenuItem(
+            value: 'recheck',
+            child: Row(
+              children: [
+                Icon(Icons.verified_outlined, size: 18),
+                SizedBox(width: 10),
+                Expanded(child: Text('Recheck File')),
+              ],
+            ),
+          ),
+        const PopupMenuItem(
+          value: 'hash',
+          child: Row(
+            children: [
+              Icon(Icons.fingerprint_rounded, size: 18),
+              SizedBox(width: 10),
+              Expanded(child: Text('File Hash')),
+            ],
+          ),
+        ),
       ],
       const PopupMenuItem(
         value: 'copy_url',
@@ -366,6 +390,12 @@ class _DownloadTileState extends State<DownloadTile> {
       case 'open_folder':
         widget.fileService.openContainingFolder(widget.task.savePath);
         break;
+      case 'recheck':
+        RecheckDialog.show(context, widget.task);
+        break;
+      case 'hash':
+        HashDialog.show(context, widget.task);
+        break;
       case 'copy_url':
         Clipboard.setData(ClipboardData(text: widget.task.url));
         ScaffoldMessenger.of(context).showSnackBar(
@@ -473,6 +503,19 @@ class _DownloadTileState extends State<DownloadTile> {
                 child: InkWell(
                   borderRadius: BorderRadius.circular(8),
                   onTap: () {
+                    final now = DateTime.now().millisecondsSinceEpoch;
+                    final isRapidSecondTap = (now - _lastTapTime) < 300;
+                    _lastTapTime = now;
+
+                    if (isRapidSecondTap && widget.task.status == DownloadStatus.completed) {
+                      if (widget.onOpen != null) {
+                        widget.onOpen!();
+                      } else {
+                        widget.fileService.openFile(widget.task.savePath);
+                      }
+                      return;
+                    }
+
                     if (AppUtils.isDesktop) {
                       final isMulti = HardwareKeyboard.instance.isControlPressed ||
                           HardwareKeyboard.instance.isMetaPressed;
@@ -480,19 +523,11 @@ class _DownloadTileState extends State<DownloadTile> {
                     } else {
                       if (widget.task.status == DownloadStatus.completed) {
                         widget.fileService.openFile(widget.task.savePath);
+                      } else {
+                        widget.onSelect?.call(false);
                       }
                     }
                   },
-                  onDoubleTap: AppUtils.isDesktop &&
-                          widget.task.status == DownloadStatus.completed
-                      ? () {
-                          if (widget.onOpen != null) {
-                            widget.onOpen!();
-                          } else {
-                            widget.fileService.openFile(widget.task.savePath);
-                          }
-                        }
-                      : null,
                   onTapDown: (details) {
                     _tapPosition = details.globalPosition;
                   },

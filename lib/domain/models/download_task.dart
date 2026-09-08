@@ -16,6 +16,8 @@ class DownloadTask {
   final String? errorMessage;
   final Map<String, String>? headers;
   final bool isResumable;
+  final String? fileHash;
+  final HashAlgorithm? hashAlgorithm;
 
   const DownloadTask({
     required this.id,
@@ -32,6 +34,8 @@ class DownloadTask {
     this.errorMessage,
     this.headers,
     this.isResumable = true,
+    this.fileHash,
+    this.hashAlgorithm,
   });
 
   double get progress {
@@ -75,6 +79,8 @@ class DownloadTask {
     bool clearError = false,
     Map<String, String>? headers,
     bool? isResumable,
+    String? fileHash,
+    HashAlgorithm? hashAlgorithm,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -91,7 +97,8 @@ class DownloadTask {
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       headers: headers ?? this.headers,
       isResumable: isResumable ?? this.isResumable,
+      fileHash: fileHash ?? this.fileHash,
+      hashAlgorithm: hashAlgorithm ?? this.hashAlgorithm,
     );
   }
 }
-

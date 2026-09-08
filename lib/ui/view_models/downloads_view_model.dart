@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../../core/enums.dart';
 import '../../data/repositories/download_repository.dart';
+import '../../data/services/integrity_service.dart';
 import '../../domain/models/download_task.dart';
 
 class DownloadsViewModel extends ChangeNotifier {
@@ -221,5 +222,15 @@ class DownloadsViewModel extends ChangeNotifier {
   Future<void> pauseAll() => repository.pauseAll();
   Future<void> resumeAll() => repository.resumeAll();
   Future<void> cancelAllActive() => repository.cancelAllActive();
+
+  Future<RecheckResult> recheck(String id, {void Function(double progress, String status)? onProgress}) =>
+      repository.recheckTask(id, onProgress: onProgress);
+
+  Future<String> calculateHash(
+    String id,
+    HashAlgorithm algo, {
+    void Function(double progress)? onProgress,
+  }) =>
+      repository.calculateFileHash(id, algo, onProgress: onProgress);
 }
 

@@ -8,15 +8,21 @@ import '../../domain/models/download_task.dart';
 import '../services/ffmpeg_service.dart';
 import '../services/file_service.dart';
 import '../services/http_download_service.dart';
+import '../services/integrity_service.dart';
+import '../services/notification_service.dart';
+import '../services/segmented_download_service.dart';
 import '../services/storage_service.dart';
 import 'settings_repository.dart';
 
 class DownloadRepository extends ChangeNotifier {
   final HttpDownloadService httpService;
+  final SegmentedDownloadService? segmentedService;
   final StorageService storageService;
   final FileService fileService;
   final SettingsRepository settingsRepo;
   final FfmpegService? ffmpegService;
+  final NotificationService? notificationService;
+  final IntegrityService? integrityService;
 
   List<DownloadTask> _tasks = [];
   final Map<String, CancelToken> _activeTokens = {};
@@ -24,11 +30,39 @@ class DownloadRepository extends ChangeNotifier {
 
   DownloadRepository({
     required this.httpService,
+    this.segmentedService,
     required this.storageService,
     required this.fileService,
     required this.settingsRepo,
     this.ffmpegService,
-  });
+    this.notificationService,
+    this.integrityService,
+  }) {
+    NotificationService.onActionReceived = _handleNotificationAction;
+  }
+
+  void _handleNotificationAction(String action, String taskId) {
+    switch (action) {
+      case 'PAUSE':
+        pauseDownload(taskId);
+        break;
+      case 'RESUME':
+        resumeDownload(taskId);
+        break;
+      case 'CANCEL':
+        cancelDownload(taskId);
+        break;
+      case 'RETRY':
+        retryDownload(taskId);
+        break;
+      case 'OPEN_FILE':
+        final task = _tasks.where((t) => t.id == taskId).firstOrNull;
+        if (task != null && task.status == DownloadStatus.completed) {
+          fileService.openFile(task.savePath);
+        }
+        break;
+    }
+  }
 
   List<DownloadTask> get tasks => List.unmodifiable(_tasks);
 
@@ -117,6 +151,12 @@ class DownloadRepository extends ChangeNotifier {
       speedBytesPerSec: 0.0,
     );
 
+    notificationService?.showDownloadPaused(
+      taskId: task.id,
+      fileName: task.fileName,
+      progress: task.progress,
+    );
+
     _persistTasks();
     notifyListeners();
     _processQueue();
@@ -164,6 +204,7 @@ class DownloadRepository extends ChangeNotifier {
 
     // Delete partial file from disk
     await fileService.deleteFile(task.savePath);
+    notificationService?.cancelNotification(task.id);
 
     _tasks[index] = task.copyWith(
       status: DownloadStatus.cancelled,
@@ -258,6 +299,8 @@ class DownloadRepository extends ChangeNotifier {
       _activeTokens.remove(id);
     }
 
+    notificationService?.cancelNotification(task.id);
+
     if (deleteFileOnDisk) {
       await fileService.deleteFile(task.savePath);
     }
@@ -299,6 +342,52 @@ class DownloadRepository extends ChangeNotifier {
     }
   }
 
+  /// Calculates file hash for a completed download
+  Future<String> calculateFileHash(
+    String id,
+    HashAlgorithm algorithm, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) throw StateError('Task not found');
+    final task = _tasks[index];
+
+    final service = integrityService ?? IntegrityService();
+    final hash = await service.calculateFileHash(
+      task.savePath,
+      algorithm,
+      onProgress: onProgress,
+    );
+
+    _tasks[index] = task.copyWith(
+      fileHash: hash,
+      hashAlgorithm: algorithm,
+    );
+    _persistTasks();
+    notifyListeners();
+    return hash;
+  }
+
+  /// Performs torrent-style recheck against the remote server
+  Future<RecheckResult> recheckTask(
+    String id, {
+    void Function(double progress, String status)? onProgress,
+  }) async {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) throw StateError('Task not found');
+    final task = _tasks[index];
+
+    final service = integrityService ?? IntegrityService();
+    final dio = Dio();
+    return await service.recheckFile(
+      url: task.url,
+      localFilePath: task.savePath,
+      dio: dio,
+      headers: task.headers,
+      onProgress: onProgress,
+    );
+  }
+
   /// Checks the queue and launches tasks up to the concurrent limit
   void _processQueue() {
     final maxConcurrent = settingsRepo.currentSettings.maxConcurrentDownloads;
@@ -329,6 +418,7 @@ class DownloadRepository extends ChangeNotifier {
     );
     notifyListeners();
 
+    final settings = settingsRepo.currentSettings;
     final isStream = task.url.toLowerCase().contains('.m3u8') ||
         task.fileName.toLowerCase().endsWith('.m3u8') ||
         (task.savePath.toLowerCase().endsWith('.mkv') && task.url.toLowerCase().contains('.m3u8'));
@@ -355,6 +445,58 @@ class DownloadRepository extends ChangeNotifier {
               status: DownloadStatus.downloading,
             );
             notifyListeners();
+
+            notificationService?.showDownloadProgress(
+              taskId: taskId,
+              fileName: task.fileName,
+              progress: _tasks[idx].progress,
+              speedBytesPerSec: speedBytesPerSec,
+            );
+          },
+        );
+      } else if (segmentedService != null &&
+          (settings.defaultWorkerCount > 1 ||
+              settings.usePlaceholderMode ||
+              settings.speedLimitMode == SpeedLimitMode.rocket)) {
+        await segmentedService!.downloadFileSegmented(
+          url: task.url,
+          savePath: task.savePath,
+          workerCount: settings.defaultWorkerCount,
+          cancelToken: cancelToken,
+          usePlaceholderMode: settings.usePlaceholderMode,
+          speedLimitMode: settings.speedLimitMode,
+          availableProxies: settings.proxyServers,
+          headers: task.headers,
+          onResumableChecked: ({required bool isResumable}) {
+            final idx = _tasks.indexWhere((t) => t.id == taskId);
+            if (idx != -1 && _tasks[idx].isResumable != isResumable) {
+              _tasks[idx] = _tasks[idx].copyWith(isResumable: isResumable);
+              _persistTasks();
+              notifyListeners();
+            }
+          },
+          onProgress: ({
+            required int downloadedBytes,
+            required int totalBytes,
+            required double speedBytesPerSec,
+          }) {
+            final idx = _tasks.indexWhere((t) => t.id == taskId);
+            if (idx == -1) return;
+
+            _tasks[idx] = _tasks[idx].copyWith(
+              downloadedBytes: downloadedBytes,
+              totalBytes: totalBytes > 0 ? totalBytes : _tasks[idx].totalBytes,
+              speedBytesPerSec: speedBytesPerSec,
+              status: DownloadStatus.downloading,
+            );
+            notifyListeners();
+
+            notificationService?.showDownloadProgress(
+              taskId: taskId,
+              fileName: task.fileName,
+              progress: _tasks[idx].progress,
+              speedBytesPerSec: speedBytesPerSec,
+            );
           },
         );
       } else {
@@ -386,6 +528,13 @@ class DownloadRepository extends ChangeNotifier {
               status: DownloadStatus.downloading,
             );
             notifyListeners();
+
+            notificationService?.showDownloadProgress(
+              taskId: taskId,
+              fileName: task.fileName,
+              progress: _tasks[idx].progress,
+              speedBytesPerSec: speedBytesPerSec,
+            );
           },
         );
       }
@@ -404,6 +553,16 @@ class DownloadRepository extends ChangeNotifier {
         );
         _persistTasks();
         notifyListeners();
+
+        notificationService?.showDownloadComplete(
+          taskId: taskId,
+          fileName: current.fileName,
+          savePath: current.savePath,
+        );
+
+        if (settings.autoRecheckOnComplete && current.isResumable) {
+          recheckTask(taskId);
+        }
       }
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {
@@ -418,6 +577,12 @@ class DownloadRepository extends ChangeNotifier {
           );
           _persistTasks();
           notifyListeners();
+
+          notificationService?.showDownloadFailed(
+            taskId: taskId,
+            fileName: task.fileName,
+            error: e.message ?? 'Network error',
+          );
         }
       }
     } catch (e) {
@@ -430,6 +595,12 @@ class DownloadRepository extends ChangeNotifier {
         );
         _persistTasks();
         notifyListeners();
+
+        notificationService?.showDownloadFailed(
+          taskId: taskId,
+          fileName: task.fileName,
+          error: e.toString(),
+        );
       }
     } finally {
       _activeTokens.remove(taskId);
@@ -441,4 +612,3 @@ class DownloadRepository extends ChangeNotifier {
     storageService.saveTasks(_tasks);
   }
 }
-

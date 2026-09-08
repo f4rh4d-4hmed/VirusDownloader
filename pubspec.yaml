@@ -33,6 +33,10 @@ dependencies:
   # Utilities
   url_launcher: ^6.3.1
   uuid: ^4.5.1
+  awesome_notifications: ^0.12.1
+  permission_handler: ^13.0.2
+  crypto: ^3.0.7
+  socks5_proxy: ^2.1.1
 
 dev_dependencies:
   flutter_test:

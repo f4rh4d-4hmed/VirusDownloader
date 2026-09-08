@@ -13,7 +13,12 @@ import 'data/services/browser_integration_service.dart';
 import 'data/services/ffmpeg_service.dart';
 import 'data/services/file_service.dart';
 import 'data/services/http_download_service.dart';
+import 'data/services/integrity_service.dart';
 import 'data/services/integration_server_service.dart';
+import 'data/services/notification_service.dart';
+import 'data/services/permission_service.dart';
+import 'data/services/proxy_service.dart';
+import 'data/services/segmented_download_service.dart';
 import 'data/services/storage_service.dart';
 import 'ui/view_models/downloads_view_model.dart';
 import 'ui/view_models/settings_view_model.dart';
@@ -40,23 +45,39 @@ void main() async {
     }
   }
 
-  // Initialize Core Services & Repositories
+  // Initialize Core Services & Startup Permissions
+  final permissionService = PermissionService();
+  await permissionService.requestNotificationPermission();
+
+  final notificationService = NotificationService();
+  await notificationService.init();
+
   final storageService = StorageService();
   await storageService.init();
 
   final fileService = FileService();
   final httpService = HttpDownloadService();
   final ffmpegService = FfmpegService();
+  final proxyService = ProxyService();
+  final integrityService = IntegrityService();
+
+  final segmentedService = SegmentedDownloadService(
+    proxyService: proxyService,
+    fileService: fileService,
+  );
 
   final settingsRepository = SettingsRepository(storageService: storageService);
   await settingsRepository.init();
 
   final downloadRepository = DownloadRepository(
     httpService: httpService,
+    segmentedService: segmentedService,
     storageService: storageService,
     fileService: fileService,
     settingsRepo: settingsRepository,
     ffmpegService: ffmpegService,
+    notificationService: notificationService,
+    integrityService: integrityService,
   );
   await downloadRepository.init();
 
@@ -74,10 +95,15 @@ void main() async {
     MultiProvider(
       providers: [
         // Services
+        Provider<PermissionService>.value(value: permissionService),
+        Provider<NotificationService>.value(value: notificationService),
         Provider<StorageService>.value(value: storageService),
         Provider<FileService>.value(value: fileService),
         Provider<HttpDownloadService>.value(value: httpService),
         Provider<FfmpegService>.value(value: ffmpegService),
+        Provider<ProxyService>.value(value: proxyService),
+        Provider<IntegrityService>.value(value: integrityService),
+        Provider<SegmentedDownloadService>.value(value: segmentedService),
         Provider<BrowserIntegrationService>.value(value: browserIntegrationService),
         ChangeNotifierProvider<IntegrationServerService>.value(value: integrationServer),
 
@@ -94,6 +120,7 @@ void main() async {
             repository: settingsRepository,
             browserService: browserIntegrationService,
             integrationServer: integrationServer,
+            proxyService: proxyService,
           ),
         ),
       ],
