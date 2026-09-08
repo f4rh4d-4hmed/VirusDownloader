@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:virusdownloader/core/enums.dart';
 import 'package:virusdownloader/data/services/segmented_download_service.dart';
+import 'package:virusdownloader/domain/models/app_settings.dart';
 import 'package:virusdownloader/domain/models/proxy_config.dart';
 
 void main() {
@@ -88,6 +89,32 @@ void main() {
       expect(second?.host, '10.0.0.3');
 
       expect(pool.acquireNext(), isNull);
+    });
+
+    test('Placeholder file mode is enabled by default and threshold is 3GB', () {
+      const defaultSettings = AppSettings();
+      expect(defaultSettings.usePlaceholderMode, isTrue);
+
+      expect(maxPlaceholderFileSize, 3 * 1024 * 1024 * 1024);
+
+      // Files < 3GB should be eligible for pre-allocation
+      const smallFileSize = 2 * 1024 * 1024 * 1024; // 2GB
+      final smallEligible = defaultSettings.usePlaceholderMode &&
+          smallFileSize > 0 &&
+          smallFileSize < maxPlaceholderFileSize;
+      expect(smallEligible, isTrue);
+
+      // Files >= 3GB should NOT be pre-allocated
+      const largeFileSize = 4 * 1024 * 1024 * 1024; // 4GB
+      final largeEligible = defaultSettings.usePlaceholderMode &&
+          largeFileSize > 0 &&
+          largeFileSize < maxPlaceholderFileSize;
+      expect(largeEligible, isFalse);
+    });
+
+    test('Default worker count is 8 parts per file', () {
+      const defaultSettings = AppSettings();
+      expect(defaultSettings.defaultWorkerCount, 8);
     });
   });
 }

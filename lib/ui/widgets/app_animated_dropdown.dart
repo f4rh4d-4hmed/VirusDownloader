@@ -24,6 +24,7 @@ class AppAnimatedDropdown<T> extends StatefulWidget {
   final List<AppDropdownItem<T>> items;
   final ValueChanged<T?>? onChanged;
   final bool isDense;
+  final double? width;
   final double? menuWidth;
   final String? tooltip;
   final EdgeInsetsGeometry? contentPadding;
@@ -34,6 +35,7 @@ class AppAnimatedDropdown<T> extends StatefulWidget {
     required this.items,
     required this.onChanged,
     this.isDense = false,
+    this.width,
     this.menuWidth,
     this.tooltip,
     this.contentPadding,
@@ -139,9 +141,24 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
       builder: (context) {
         final theme = Theme.of(context);
         final effectiveWidth = widget.menuWidth ??
-            (buttonSize.width < 210 ? 230.0 : buttonSize.width);
+            (widget.width ?? (buttonSize.width < 210 ? 230.0 : buttonSize.width));
 
-        final alignment = _openUpwards ? Alignment.bottomLeft : Alignment.topLeft;
+        final screenSize = MediaQuery.of(context).size;
+        final spaceToRight = screenSize.width - buttonPosition.dx;
+        final openToLeft = (spaceToRight < effectiveWidth + 16.0) ||
+            (buttonPosition.dx + (buttonSize.width / 2) > screenSize.width / 2);
+
+        final targetAnchor = _openUpwards
+            ? (openToLeft ? Alignment.topRight : Alignment.topLeft)
+            : (openToLeft ? Alignment.bottomRight : Alignment.bottomLeft);
+
+        final followerAnchor = _openUpwards
+            ? (openToLeft ? Alignment.bottomRight : Alignment.bottomLeft)
+            : (openToLeft ? Alignment.topRight : Alignment.topLeft);
+
+        final alignment = _openUpwards
+            ? (openToLeft ? Alignment.bottomRight : Alignment.bottomLeft)
+            : (openToLeft ? Alignment.topRight : Alignment.topLeft);
 
         return Stack(
           children: [
@@ -158,8 +175,8 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
             CompositedTransformFollower(
               link: _layerLink,
               showWhenUnlinked: false,
-              targetAnchor: _openUpwards ? Alignment.topLeft : Alignment.bottomLeft,
-              followerAnchor: _openUpwards ? Alignment.bottomLeft : Alignment.topLeft,
+              targetAnchor: targetAnchor,
+              followerAnchor: followerAnchor,
               offset: Offset(0, _openUpwards ? -6.0 : 6.0),
               child: FadeTransition(
                 opacity: _fadeAnimation,
@@ -316,6 +333,7 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
         hoverColor: theme.colorScheme.primary.withValues(alpha: 0.08),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
+          width: widget.width,
           padding: widget.contentPadding ??
               (isDense
                   ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4)
@@ -333,7 +351,8 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
             ),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: widget.width != null ? MainAxisSize.max : MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               if (selectedItem.icon != null) ...[
                 IconTheme(
@@ -345,16 +364,31 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
                 ),
                 SizedBox(width: isDense ? 6 : 8),
               ],
-              Text(
-                selectedItem.label,
-                style: (isDense
-                        ? theme.textTheme.bodySmall
-                        : theme.textTheme.bodyMedium)
-                    ?.copyWith(
-                  fontWeight: FontWeight.w500,
-                  color: theme.colorScheme.onSurface,
-                ),
-              ),
+              widget.width != null
+                  ? Expanded(
+                      child: Text(
+                        selectedItem.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: (isDense
+                                ? theme.textTheme.bodySmall
+                                : theme.textTheme.bodyMedium)
+                            ?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                    )
+                  : Text(
+                      selectedItem.label,
+                      style: (isDense
+                              ? theme.textTheme.bodySmall
+                              : theme.textTheme.bodyMedium)
+                          ?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                    ),
               SizedBox(width: isDense ? 4 : 6),
               AnimatedRotation(
                 turns: _isOpen ? 0.5 : 0.0,

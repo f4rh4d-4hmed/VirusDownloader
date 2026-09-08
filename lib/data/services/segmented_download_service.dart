@@ -12,6 +12,10 @@ import 'file_service.dart';
 import 'http_download_service.dart';
 import 'proxy_service.dart';
 
+/// Maximum file size for placeholder pre-allocation (3GB).
+/// Files larger than or equal to 3GB skip pre-allocation to prevent system stutter and disk wear.
+const int maxPlaceholderFileSize = 3 * 1024 * 1024 * 1024;
+
 class SegmentWorkerState {
   final int index;
   final int startByte;
@@ -101,10 +105,11 @@ class SegmentedDownloadService {
   Future<void> downloadFileSegmented({
     required String url,
     required String savePath,
+    String? tempPath,
     required int workerCount,
     required CancelToken cancelToken,
     required DownloadProgressCallback onProgress,
-    bool usePlaceholderMode = false,
+    bool usePlaceholderMode = true,
     SpeedLimitMode speedLimitMode = SpeedLimitMode.unlimited,
     List<ProxyConfig> availableProxies = const [],
     Map<String, String>? headers,
@@ -158,40 +163,39 @@ class SegmentedDownloadService {
 
     onResumableChecked?.call(isResumable: isResumable);
 
+    // 2. Storage Strategy
+    final shouldPreallocate = usePlaceholderMode &&
+        totalBytes > 0 &&
+        totalBytes < maxPlaceholderFileSize;
+
+    String activeFilePath = tempPath ?? savePath;
+    if (tempPath == null && AppUtils.isMobile && Platform.isAndroid && shouldPreallocate) {
+      try {
+        final tempDir = await getApplicationSupportDirectory();
+        final fileName = savePath.split(Platform.pathSeparator).last;
+        activeFilePath = '${tempDir.path}${Platform.pathSeparator}$fileName';
+      } catch (_) {
+        activeFilePath = savePath;
+      }
+    }
+
     // If server does not support byte ranges or size is unknown, fallback to single stream
     if (!isResumable || totalBytes <= 0 || (workerCount <= 1 && speedLimitMode != SpeedLimitMode.rocket)) {
       final singleService = HttpDownloadService();
       await singleService.downloadFile(
         url: url,
-        savePath: savePath,
+        savePath: activeFilePath,
         cancelToken: cancelToken,
         onProgress: onProgress,
         allowResume: isResumable,
         headers: headers,
         onResumableChecked: onResumableChecked,
       );
-      return;
-    }
-
-    // 2. Storage Strategy for Android
-    // On Android, if placeholder mode is enabled, use private storage if file fits,
-    // otherwise fallback to direct-write to public storage.
-    String activeFilePath = savePath;
-    bool usingPrivateTemp = false;
-
-    if (AppUtils.isMobile && Platform.isAndroid && usePlaceholderMode) {
-      try {
-        final tempDir = await getApplicationSupportDirectory();
-        final fileName = savePath.split(Platform.pathSeparator).last;
-        final privatePath = '${tempDir.path}${Platform.pathSeparator}$fileName';
-
-        // Check if private storage can hold file
-        activeFilePath = privatePath;
-        usingPrivateTemp = true;
-      } catch (_) {
-        activeFilePath = savePath;
-        usingPrivateTemp = false;
+      if (activeFilePath != savePath && !cancelToken.isCancelled) {
+        onStatusMessage?.call('Moving file to destination...');
+        await fileService.moveFile(activeFilePath, savePath);
       }
+      return;
     }
 
     // 3. Worker Distribution & Dynamic Proxy Pool for Rocket Mode
@@ -210,6 +214,23 @@ class SegmentedDownloadService {
     // Check for existing metadata (resuming segmented download)
     final metaFile = File('$activeFilePath.vdown_meta');
     bool metaRestored = false;
+
+    // Failsafe migration: if metadata exists at savePath but not activeFilePath (legacy resume)
+    if (!await metaFile.exists() && activeFilePath != savePath) {
+      final legacyMeta = File('$savePath.vdown_meta');
+      if (await legacyMeta.exists()) {
+        try {
+          await legacyMeta.copy(metaFile.path);
+          await fileService.deleteFile(legacyMeta.path);
+        } catch (_) {}
+      }
+      final legacyData = File(savePath);
+      if (await legacyData.exists() && !await File(activeFilePath).exists()) {
+        try {
+          await fileService.moveFile(savePath, activeFilePath);
+        } catch (_) {}
+      }
+    }
 
     if (await metaFile.exists()) {
       try {
@@ -267,7 +288,7 @@ class SegmentedDownloadService {
         await parentDir.create(recursive: true);
       }
 
-      if (usePlaceholderMode) {
+      if (shouldPreallocate) {
         onStatusMessage?.call('Pre-allocating placeholder file...');
         final raf = await targetFile.open(mode: FileMode.write);
         try {
@@ -483,24 +504,16 @@ class SegmentedDownloadService {
 
     // 6. Post-Download Cleanup & Storage Finalization
     if (totalDownloaded >= totalBytes && !cancelToken.isCancelled) {
-      // Remove metadata file
-      try {
-        if (await metaFile.exists()) {
-          await metaFile.delete();
-        }
-      } catch (_) {}
+      // Failsafe removal of metadata file
+      await fileService.deleteFile(metaFile.path);
 
-      // If downloaded to private temp on Android, move to final designated folder
-      if (usingPrivateTemp && activeFilePath != savePath) {
+      // If downloaded to temp, move to final designated folder
+      if (activeFilePath != savePath) {
         onStatusMessage?.call('Moving file to destination...');
-        final tempF = File(activeFilePath);
-        final destF = File(savePath);
-        final destDir = destF.parent;
-        if (!await destDir.exists()) {
-          await destDir.create(recursive: true);
+        final moved = await fileService.moveFile(activeFilePath, savePath);
+        if (!moved) {
+          throw FileSystemException('Failed to move completed file to destination', savePath);
         }
-        await tempF.copy(savePath);
-        await tempF.delete();
       }
 
       onProgress(

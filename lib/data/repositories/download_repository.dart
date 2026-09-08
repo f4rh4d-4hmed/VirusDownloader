@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
@@ -202,8 +203,13 @@ class DownloadRepository extends ChangeNotifier {
       _activeTokens.remove(id);
     }
 
-    // Delete partial file from disk
-    await fileService.deleteFile(task.savePath);
+    // Properly clean up all temp files, metadata, and partial file failsafe
+    await fileService.cleanupTaskFiles(
+      taskId: task.id,
+      fileName: task.fileName,
+      savePath: task.savePath,
+      deleteTargetFile: true,
+    );
     notificationService?.cancelNotification(task.id);
 
     _tasks[index] = task.copyWith(
@@ -267,7 +273,12 @@ class DownloadRepository extends ChangeNotifier {
     }
 
     if (restartFromBeginning) {
-      await fileService.deleteFile(task.savePath);
+      await fileService.cleanupTaskFiles(
+        taskId: task.id,
+        fileName: task.fileName,
+        savePath: task.savePath,
+        deleteTargetFile: true,
+      );
     }
 
     _tasks[index] = task.copyWith(
@@ -301,9 +312,14 @@ class DownloadRepository extends ChangeNotifier {
 
     notificationService?.cancelNotification(task.id);
 
-    if (deleteFileOnDisk) {
-      await fileService.deleteFile(task.savePath);
-    }
+    // Failsafe cleanup of this task's individual temp file & meta (and target file if requested).
+    // Never deletes the shared temp directory so other active downloads are unaffected.
+    await fileService.cleanupTaskFiles(
+      taskId: task.id,
+      fileName: task.fileName,
+      savePath: task.savePath,
+      deleteTargetFile: deleteFileOnDisk,
+    );
 
     _tasks.removeAt(index);
     _persistTasks();
@@ -467,11 +483,13 @@ class DownloadRepository extends ChangeNotifier {
         task.fileName.toLowerCase().endsWith('.m3u8') ||
         (task.savePath.toLowerCase().endsWith('.mkv') && task.url.toLowerCase().contains('.m3u8'));
 
+    final tempFilePath = await fileService.getTaskTempFilePath(taskId, task.fileName);
+
     try {
       if (isStream && ffmpegService != null) {
         await ffmpegService!.downloadHlsStream(
           m3u8Url: task.url,
-          savePath: task.savePath,
+          savePath: tempFilePath,
           cancelToken: cancelToken,
           headers: task.headers,
           onProgress: ({
@@ -498,6 +516,13 @@ class DownloadRepository extends ChangeNotifier {
             );
           },
         );
+        if (!cancelToken.isCancelled) {
+          final moved = await fileService.moveFile(tempFilePath, task.savePath);
+          if (!moved) {
+            throw FileSystemException('Failed to move completed file to destination', task.savePath);
+          }
+          await fileService.deleteFile('$tempFilePath.vdown_meta');
+        }
       } else if (segmentedService != null &&
           (settings.defaultWorkerCount > 1 ||
               settings.usePlaceholderMode ||
@@ -505,6 +530,7 @@ class DownloadRepository extends ChangeNotifier {
         await segmentedService!.downloadFileSegmented(
           url: task.url,
           savePath: task.savePath,
+          tempPath: tempFilePath,
           workerCount: settings.defaultWorkerCount,
           cancelToken: cancelToken,
           usePlaceholderMode: settings.usePlaceholderMode,
@@ -547,9 +573,12 @@ class DownloadRepository extends ChangeNotifier {
           },
         );
       } else {
+        if (!await fileService.fileExists(tempFilePath) && await fileService.fileExists(task.savePath)) {
+          await fileService.moveFile(task.savePath, tempFilePath);
+        }
         await httpService.downloadFile(
           url: task.url,
-          savePath: task.savePath,
+          savePath: tempFilePath,
           cancelToken: cancelToken,
           headers: task.headers,
           onResumableChecked: ({required bool isResumable}) {
@@ -584,6 +613,12 @@ class DownloadRepository extends ChangeNotifier {
             );
           },
         );
+        if (!cancelToken.isCancelled) {
+          final moved = await fileService.moveFile(tempFilePath, task.savePath);
+          if (!moved) {
+            throw FileSystemException('Failed to move completed file to destination', task.savePath);
+          }
+        }
       }
 
       // Successfully completed

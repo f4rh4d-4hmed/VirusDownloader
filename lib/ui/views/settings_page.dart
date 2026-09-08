@@ -8,7 +8,6 @@ import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../view_models/settings_view_model.dart';
 import '../widgets/app_animated_dropdown.dart';
-import '../widgets/speed_limit_icon.dart';
 import 'proxy_settings_section.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -73,23 +72,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Theme',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Choose your preferred appearance',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'Theme',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       SegmentedButton<ThemeMode>(
                         showSelectedIcon: false,
@@ -138,17 +125,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   children: [
                     // Default save folder
                     ListTile(
-                      leading: const Icon(Icons.folder_outlined),
-                      title: const Text('Default Save Directory'),
+                      title: const Text('Save Location'),
                       subtitle: Text(
                         settings.defaultSavePath.isNotEmpty
                             ? settings.defaultSavePath
-                            : 'System Default Downloads Folder',
+                            : 'System Default',
                       ),
                       trailing: OutlinedButton(
                         onPressed: () async {
                           final selected = await FilePicker.platform.getDirectoryPath(
-                            dialogTitle: 'Select Default Downloads Directory',
+                            dialogTitle: 'Select Downloads Directory',
                             initialDirectory: settings.defaultSavePath.isNotEmpty
                                 ? settings.defaultSavePath
                                 : null,
@@ -163,17 +149,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Max concurrent downloads
                     ListTile(
-                      leading: const Icon(Icons.queue_outlined),
                       title: const Text('Max Concurrent Downloads'),
-                      subtitle: const Text('Limit active simultaneous download tasks'),
                       trailing: AppAnimatedDropdown<int>(
                         value: settings.maxConcurrentDownloads,
-                        menuWidth: 160,
+                        width: 200,
+                        menuWidth: 200,
                         items: [1, 2, 3, 4, 5, 8].map((count) {
                           return AppDropdownItem<int>(
                             value: count,
-                            label: '$count tasks',
-                            icon: const Icon(Icons.queue_outlined, size: 16),
+                            label: count == 1 ? '1 task' : '$count tasks',
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -186,17 +170,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Per-file worker concurrency
                     ListTile(
-                      leading: const Icon(Icons.layers_outlined),
-                      title: const Text('Download Parts / Workers per File'),
-                      subtitle: const Text('Split each file into parallel parts to maximize speed'),
+                      title: const Text('Download Parts'),
                       trailing: AppAnimatedDropdown<int>(
                         value: settings.defaultWorkerCount,
-                        menuWidth: 180,
+                        width: 200,
+                        menuWidth: 200,
                         items: [1, 2, 4, 6, 8, 12, 16].map((parts) {
                           return AppDropdownItem<int>(
                             value: parts,
                             label: parts == 1 ? '1 part (Single)' : '$parts parts',
-                            icon: const Icon(Icons.layers_outlined, size: 16),
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -209,25 +191,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Speed limit mode
                     ListTile(
-                      leading: SpeedLimitIcon(
-                        mode: settings.speedLimitMode,
-                        size: 24,
-                        color: SpeedLimitIcon.getAccentColor(settings.speedLimitMode, theme.colorScheme),
-                      ),
-                      title: const Text('Speed Limiter Mode'),
-                      subtitle: Text(settings.speedLimitMode == SpeedLimitMode.rocket
-                          ? 'Accelerate by distributing parts across proxy servers'
-                          : settings.speedLimitMode.description),
+                      title: const Text('Speed Limit'),
                       trailing: AppAnimatedDropdown<SpeedLimitMode>(
                         value: settings.speedLimitMode,
-                        menuWidth: 260,
+                        width: 200,
+                        menuWidth: 200,
                         items: SpeedLimitMode.values.map((mode) {
                           return AppDropdownItem<SpeedLimitMode>(
                             value: mode,
                             label: mode.label,
-                            subtitle: mode.description,
-                            icon: SpeedLimitIcon(mode: mode, size: 16),
-                            accentColor: SpeedLimitIcon.getAccentColor(mode, theme.colorScheme),
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -249,9 +221,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Placeholder pre-allocation
                     SwitchListTile(
-                      secondary: const Icon(Icons.note_add_outlined),
-                      title: const Text('Placeholder File Mode'),
-                      subtitle: const Text('Pre-allocates file space with zeros for fast resume (resumable links only)'),
+                      title: const Text('Placeholder Pre-allocation (< 3GB)'),
                       value: settings.usePlaceholderMode,
                       onChanged: (val) {
                         settingsVm.updatePlaceholderMode(val);
@@ -260,9 +230,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Auto-recheck
                     SwitchListTile(
-                      secondary: const Icon(Icons.verified_outlined),
-                      title: const Text('Auto-Recheck on Completion'),
-                      subtitle: const Text('Automatically verify file integrity when a download finishes'),
+                      title: const Text('Auto-verify Integrity on Complete'),
                       value: settings.autoRecheckOnComplete,
                       onChanged: (val) {
                         settingsVm.updateAutoRecheck(val);
@@ -271,9 +239,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Confirm before deleting file
                     SwitchListTile(
-                      secondary: const Icon(Icons.delete_sweep_outlined),
                       title: const Text('Confirm on File Deletion'),
-                      subtitle: const Text('Ask before permanently deleting downloaded files'),
                       value: settings.confirmOnDelete,
                       onChanged: (val) {
                         settingsVm.updateConfirmDelete(val);
@@ -285,9 +251,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
               const SizedBox(height: 28),
 
-              // Proxy & Acceleration Section
+              // Proxy Section
               Text(
-                'Proxy & Acceleration',
+                'Proxy',
                 style: theme.textTheme.titleSmall?.copyWith(
                   color: theme.colorScheme.primary,
                   fontWeight: FontWeight.bold,
@@ -299,194 +265,123 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 28),
 
               if (!AppUtils.isMobile) ...[
-                // Browser Integration & Extension Section
-                Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Browser Integration & Extension',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                // Browser Extension Section
+                Text(
+                  'Browser Extension',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.bold,
                   ),
-                  TextButton.icon(
-                    onPressed: () => _showExtensionGuideDialog(context, settingsVm),
-                    icon: const Icon(Icons.help_outline_rounded, size: 16),
-                    label: const Text('Setup Guide'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Card(
-                child: Column(
-                  children: [
-                    // Server Bridge Status
-                    ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: settingsVm.isServerRunning
-                              ? Colors.green.withValues(alpha: 0.12)
-                              : Colors.red.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          settingsVm.isServerRunning
-                              ? Icons.sensors_rounded
-                              : Icons.sensors_off_rounded,
-                          color: settingsVm.isServerRunning ? Colors.green : Colors.red,
-                          size: 20,
-                        ),
-                      ),
-                      title: Row(
-                        children: [
-                          const Text('Extension Bridge Server'),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: settingsVm.isServerRunning
-                                  ? Colors.green.withValues(alpha: 0.15)
-                                  : Colors.red.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              settingsVm.isServerRunning ? 'RUNNING' : 'STOPPED',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Column(
+                    children: [
+                      // Bridge Status & quick actions
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
                                 color: settingsVm.isServerRunning ? Colors.green : Colors.red,
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      subtitle: Text(
-                        'Listening on 127.0.0.1:${settingsVm.serverPort} • Tasks received: ${settingsVm.receivedTasksCount}',
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.folder_outlined, size: 20),
-                            tooltip: 'Open Extension Files Folder',
-                            onPressed: () => settingsVm.openExtensionFolder(),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.copy_rounded, size: 18),
-                            tooltip: 'Copy Extension Path',
-                            onPressed: () async {
-                              final p = await settingsVm.copyExtensionPath();
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Extension path copied: $p'),
-                                    duration: const Duration(seconds: 3),
-                                  ),
-                                );
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(),
-
-                    // Detected Browsers Header
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Installed Browsers (Auto-Add Extension)',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.refresh_rounded, size: 18),
-                            tooltip: 'Rescan Browsers',
-                            onPressed: () => settingsVm.initBrowserIntegration(),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    if (settingsVm.isDetectingBrowsers)
-                      const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    else if (settingsVm.detectedBrowsers.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          children: [
+                            const SizedBox(width: 10),
                             Text(
-                              'No standard Chromium browsers auto-detected.',
-                              style: theme.textTheme.bodySmall,
+                              settingsVm.isServerRunning
+                                  ? 'Bridge Running (Port ${settingsVm.serverPort})'
+                                  : 'Bridge Stopped',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                            const SizedBox(height: 8),
-                            FilledButton.tonalIcon(
-                              onPressed: () => _showExtensionGuideDialog(context, settingsVm),
-                              icon: const Icon(Icons.add_to_home_screen_rounded, size: 16),
-                              label: const Text('Manual Browser Installation'),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.folder_open_outlined, size: 20),
+                              tooltip: 'Open Extension Folder',
+                              onPressed: () => settingsVm.openExtensionFolder(),
                             ),
-                          ],
-                        ),
-                      )
-                    else
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: settingsVm.detectedBrowsers.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (ctx, index) {
-                          final browser = settingsVm.detectedBrowsers[index];
-                          return ListTile(
-                            leading: Icon(
-                              _getBrowserIcon(browser.name),
-                              color: theme.colorScheme.primary,
-                            ),
-                            title: Text(browser.name),
-                            subtitle: Text(
-                              browser.executablePath,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            trailing: FilledButton.tonalIcon(
-                              icon: const Icon(Icons.launch_rounded, size: 16),
-                              label: const Text('Auto-Add & Launch'),
+                            IconButton(
+                              icon: const Icon(Icons.copy_rounded, size: 18),
+                              tooltip: 'Copy Extension Path',
                               onPressed: () async {
-                                final success = await settingsVm.launchBrowser(browser);
+                                final p = await settingsVm.copyExtensionPath();
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(
-                                        success
-                                            ? '${browser.name} launched with extension! Path copied to clipboard.'
-                                            : 'Failed to launch ${browser.name}.',
-                                      ),
-                                      action: SnackBarAction(
-                                        label: 'Guide',
-                                        onPressed: () => _showExtensionGuideDialog(context, settingsVm),
-                                      ),
+                                      content: Text('Extension path copied: $p'),
+                                      duration: const Duration(seconds: 3),
                                     ),
                                   );
                                 }
                               },
                             ),
-                          );
-                        },
+                            IconButton(
+                              icon: const Icon(Icons.help_outline_rounded, size: 18),
+                              tooltip: 'Setup Guide',
+                              onPressed: () => _showExtensionGuideDialog(context, settingsVm),
+                            ),
+                          ],
+                        ),
                       ),
-                  ],
-                ),
-              ),
 
-              const SizedBox(height: 28),
+                      // Detected Browsers
+                      if (settingsVm.isDetectingBrowsers)
+                        const Padding(
+                          padding: EdgeInsets.all(16.0),
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        )
+                      else if (settingsVm.detectedBrowsers.isNotEmpty) ...[
+                        const Divider(height: 1),
+                        ListView.separated(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: settingsVm.detectedBrowsers.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (ctx, index) {
+                            final browser = settingsVm.detectedBrowsers[index];
+                            return ListTile(
+                              dense: true,
+                              leading: Icon(
+                                _getBrowserIcon(browser.name),
+                                color: theme.colorScheme.primary,
+                                size: 22,
+                              ),
+                              title: Text(browser.name, style: const TextStyle(fontWeight: FontWeight.w500)),
+                              trailing: FilledButton.tonal(
+                                style: FilledButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                ),
+                                onPressed: () async {
+                                  final success = await settingsVm.launchBrowser(browser);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          success
+                                              ? '${browser.name} launched with extension!'
+                                              : 'Failed to launch ${browser.name}.',
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: const Text('Launch'),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 28),
               ],
 
               // About Section

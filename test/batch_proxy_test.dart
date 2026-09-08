@@ -133,6 +133,14 @@ http://192.168.1.50:8080
       expect(vm.settings.proxyServers.length, 2);
     });
 
+    test('single input field handles comma and semicolon separated proxies', () {
+      const input = 'socks5://127.0.0.1:1080, http://10.0.0.1:8080; socks5://192.168.1.1:9050';
+      final err = vm.addProxy(input);
+
+      expect(err, isNull);
+      expect(vm.settings.proxyServers.length, 3);
+    });
+
     test('testAllProxies tests all proxies and reports progress', () async {
       vm.addMultipleProxies('http://live.proxy.com:8080\nhttp://dead.proxy.com:8080');
       expect(vm.settings.proxyServers.length, 2);
@@ -163,7 +171,7 @@ http://192.168.1.50:8080
   });
 
   group('ProxySettingsSection Widget Tests', () {
-    testWidgets('shows Add Multiple button and opens dialog', (tester) async {
+    testWidgets('accepts multiple proxies directly in existing input box', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -175,33 +183,22 @@ http://192.168.1.50:8080
         ),
       );
 
-      // Verify "Add Multiple" button is present
-      expect(find.text('Add Multiple'), findsOneWidget);
+      // Verify input field and Add button are present
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'Add'), findsOneWidget);
 
-      // Tap "Add Multiple"
-      await tester.tap(find.text('Add Multiple'));
-      await tester.pumpAndSettle();
-
-      // Dialog should be open
-      expect(find.text('Add Multiple Proxies'), findsOneWidget);
-      expect(find.textContaining('Paste proxy servers line by line'), findsOneWidget);
-      expect(find.text('Paste Clipboard'), findsOneWidget);
-
-      // Enter proxy lines into the dialog TextField
+      // Enter multiple proxies separated by newlines into the input field
       await tester.enterText(
-        find.byType(TextField).last,
+        find.byType(TextField),
         'socks5://1.2.3.4:1080\nhttp://5.6.7.8:8080',
       );
       await tester.pump();
 
-      expect(find.text('2 proxies detected'), findsOneWidget);
-
-      // Tap "Add (2)" button
-      await tester.tap(find.text('Add (2)'));
+      // Tap "Add" button
+      await tester.tap(find.widgetWithText(FilledButton, 'Add'));
       await tester.pumpAndSettle();
 
-      // Dialog dismissed and proxies added
-      expect(find.text('Add Multiple Proxies'), findsNothing);
+      // Proxies added directly
       expect(vm.settings.proxyServers.length, 2);
       expect(find.text('2 configured'), findsOneWidget);
       expect(find.text('Clear All'), findsOneWidget);

@@ -147,7 +147,7 @@ class SettingsViewModel extends ChangeNotifier {
 
   String? addProxy(String input) {
     final trimmed = input.trim();
-    if (trimmed.contains('\n') || trimmed.contains('\r')) {
+    if (trimmed.contains('\n') || trimmed.contains('\r') || trimmed.contains(',') || trimmed.contains(';')) {
       final res = addMultipleProxies(trimmed);
       if (res.addedCount == 0 && res.duplicateCount > 0) {
         return 'All proxies already exist in the list.';
@@ -175,11 +175,11 @@ class SettingsViewModel extends ChangeNotifier {
     return null;
   }
 
-  /// Adds multiple proxies at once from line-delimited text.
-  /// Skips empty lines and comment lines starting with # or //.
+  /// Adds multiple proxies at once from line-, comma-, or semicolon-delimited text.
+  /// Skips empty entries and comment lines starting with # or //.
   BatchAddProxyResult addMultipleProxies(String multiLineInput) {
     final lines = multiLineInput
-        .split(RegExp(r'[\r\n]+'))
+        .split(RegExp(r'[\r\n,;]+'))
         .map((l) => l.trim())
         .where((l) => l.isNotEmpty && !l.startsWith('#') && !l.startsWith('//'))
         .toList();
