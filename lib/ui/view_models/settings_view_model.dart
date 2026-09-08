@@ -8,6 +8,25 @@ import '../../data/services/proxy_service.dart';
 import '../../domain/models/app_settings.dart';
 import '../../domain/models/proxy_config.dart';
 
+/// Result summary returned by [SettingsViewModel.addMultipleProxies].
+class BatchAddProxyResult {
+  final int addedCount;
+  final int duplicateCount;
+  final int failedCount;
+  final List<String> failedLines;
+
+  const BatchAddProxyResult({
+    required this.addedCount,
+    required this.duplicateCount,
+    required this.failedCount,
+    required this.failedLines,
+  });
+
+  bool get hasErrors => failedCount > 0;
+  bool get hasDuplicates => duplicateCount > 0;
+  bool get isSuccess => addedCount > 0;
+}
+
 class SettingsViewModel extends ChangeNotifier {
   final SettingsRepository repository;
   final BrowserIntegrationService browserService;
@@ -126,7 +145,19 @@ class SettingsViewModel extends ChangeNotifier {
   }
 
   String? addProxy(String input) {
-    final parsed = ProxyConfig.tryParse(input);
+    final trimmed = input.trim();
+    if (trimmed.contains('\n') || trimmed.contains('\r')) {
+      final res = addMultipleProxies(trimmed);
+      if (res.addedCount == 0 && res.duplicateCount > 0) {
+        return 'All proxies already exist in the list.';
+      }
+      if (res.addedCount == 0 && res.failedCount > 0) {
+        return 'Invalid proxy format. Use socks5://[user:pass@]host:port or http://host:port';
+      }
+      return null;
+    }
+
+    final parsed = ProxyConfig.tryParse(trimmed);
     if (parsed == null) {
       return 'Invalid proxy format. Use socks5://[user:pass@]host:port or http://host:port';
     }
@@ -141,6 +172,66 @@ class SettingsViewModel extends ChangeNotifier {
     repository.updateSettings(updated);
     notifyListeners();
     return null;
+  }
+
+  /// Adds multiple proxies at once from line-delimited text.
+  /// Skips empty lines and comment lines starting with # or //.
+  BatchAddProxyResult addMultipleProxies(String multiLineInput) {
+    final lines = multiLineInput
+        .split(RegExp(r'[\r\n]+'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty && !l.startsWith('#') && !l.startsWith('//'))
+        .toList();
+
+    int addedCount = 0;
+    int duplicateCount = 0;
+    int failedCount = 0;
+    final List<String> failedLines = [];
+
+    final currentList = List<ProxyConfig>.from(settings.proxyServers);
+
+    for (final line in lines) {
+      final parsed = ProxyConfig.tryParse(line);
+      if (parsed == null) {
+        failedCount++;
+        failedLines.add(line);
+        continue;
+      }
+
+      if (currentList.any((p) => p == parsed)) {
+        duplicateCount++;
+        continue;
+      }
+
+      currentList.add(parsed);
+      addedCount++;
+    }
+
+    if (addedCount > 0) {
+      final updated = settings.copyWith(proxyServers: currentList);
+      repository.updateSettings(updated);
+      notifyListeners();
+    }
+
+    return BatchAddProxyResult(
+      addedCount: addedCount,
+      duplicateCount: duplicateCount,
+      failedCount: failedCount,
+      failedLines: failedLines,
+    );
+  }
+
+  /// Clears all configured proxy servers.
+  void clearAllProxies() {
+    if (settings.proxyServers.isEmpty) return;
+    final updated = settings.copyWith(
+      proxyServers: [],
+      speedLimitMode: settings.speedLimitMode == SpeedLimitMode.rocket
+          ? SpeedLimitMode.unlimited
+          : settings.speedLimitMode,
+    );
+    repository.updateSettings(updated);
+    notifyListeners();
   }
 
   void removeProxy(int index) {

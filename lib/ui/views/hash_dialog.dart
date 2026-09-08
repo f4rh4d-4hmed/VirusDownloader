@@ -5,6 +5,7 @@ import '../../core/enums.dart';
 import '../../data/services/integrity_service.dart';
 import '../../domain/models/download_task.dart';
 import '../view_models/downloads_view_model.dart';
+import '../widgets/app_animated_dropdown.dart';
 
 class HashDialog extends StatefulWidget {
   final DownloadTask task;
@@ -120,13 +121,14 @@ class _HashDialogState extends State<HashDialog> {
                 children: [
                   Text('Algorithm:', style: theme.textTheme.bodyMedium),
                   const SizedBox(width: 12),
-                  DropdownButton<HashAlgorithm>(
+                  AppAnimatedDropdown<HashAlgorithm>(
                     value: _selectedAlgorithm,
-                    underline: const SizedBox(),
+                    menuWidth: 140,
                     items: HashAlgorithm.values.map((algo) {
-                      return DropdownMenuItem(
+                      return AppDropdownItem<HashAlgorithm>(
                         value: algo,
-                        child: Text(algo.name.toUpperCase()),
+                        label: algo.name.toUpperCase(),
+                        icon: const Icon(Icons.fingerprint, size: 16),
                       );
                     }).toList(),
                     onChanged: _isCalculating

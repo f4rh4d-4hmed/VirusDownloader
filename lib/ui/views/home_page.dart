@@ -17,6 +17,8 @@ import 'empty_state.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
 import 'settings_page.dart';
+import '../widgets/app_animated_dropdown.dart';
+import '../widgets/speed_limit_icon.dart';
 
 class HomePage extends StatefulWidget {
   final DownloadStatus? initialStatusFilter;
@@ -1217,9 +1219,11 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildStatusBar(BuildContext context, DownloadsViewModel vm) {
     final theme = Theme.of(context);
+    final settingsVm = context.watch<SettingsViewModel>();
+    final settings = settingsVm.settings;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 6.0),
       color: theme.colorScheme.surfaceContainerLow,
       child: Row(
         children: [
@@ -1237,6 +1241,47 @@ class _HomePageState extends State<HomePage> {
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
+          ),
+
+          const SizedBox(width: 12),
+          Container(
+            height: 14,
+            width: 1,
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+          const SizedBox(width: 12),
+
+          // Speed limit selector dropdown
+          AppAnimatedDropdown<SpeedLimitMode>(
+            value: settings.speedLimitMode,
+            isDense: true,
+            tooltip: 'Speed limiter mode',
+            items: SpeedLimitMode.values.map((mode) {
+              return AppDropdownItem<SpeedLimitMode>(
+                value: mode,
+                label: mode.label,
+                subtitle: mode.description,
+                icon: SpeedLimitIcon(mode: mode, size: 16),
+                accentColor: SpeedLimitIcon.getAccentColor(mode, theme.colorScheme),
+              );
+            }).toList(),
+            onChanged: (mode) {
+              if (mode == null) return;
+              if (mode == SpeedLimitMode.rocket && settings.proxyServers.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Rocket Mode requires at least one proxy server configured in Settings.'),
+                    duration: const Duration(seconds: 4),
+                    action: SnackBarAction(
+                      label: 'Settings',
+                      onPressed: () => _openSettings(context),
+                    ),
+                  ),
+                );
+                return;
+              }
+              settingsVm.updateSpeedLimitMode(mode);
+            },
           ),
 
           const Spacer(),

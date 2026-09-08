@@ -7,6 +7,8 @@ import '../../core/constants.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../view_models/settings_view_model.dart';
+import '../widgets/app_animated_dropdown.dart';
+import '../widgets/speed_limit_icon.dart';
 import 'proxy_settings_section.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -164,13 +166,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       leading: const Icon(Icons.queue_outlined),
                       title: const Text('Max Concurrent Downloads'),
                       subtitle: const Text('Limit active simultaneous download tasks'),
-                      trailing: DropdownButton<int>(
+                      trailing: AppAnimatedDropdown<int>(
                         value: settings.maxConcurrentDownloads,
-                        underline: const SizedBox(),
+                        menuWidth: 160,
                         items: [1, 2, 3, 4, 5, 8].map((count) {
-                          return DropdownMenuItem(
+                          return AppDropdownItem<int>(
                             value: count,
-                            child: Text('$count tasks'),
+                            label: '$count tasks',
+                            icon: const Icon(Icons.queue_outlined, size: 16),
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -186,13 +189,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       leading: const Icon(Icons.layers_outlined),
                       title: const Text('Download Parts / Workers per File'),
                       subtitle: const Text('Split each file into parallel parts to maximize speed'),
-                      trailing: DropdownButton<int>(
+                      trailing: AppAnimatedDropdown<int>(
                         value: settings.defaultWorkerCount,
-                        underline: const SizedBox(),
+                        menuWidth: 180,
                         items: [1, 2, 4, 6, 8, 12, 16].map((parts) {
-                          return DropdownMenuItem(
+                          return AppDropdownItem<int>(
                             value: parts,
-                            child: Text(parts == 1 ? '1 part (Single)' : '$parts parts'),
+                            label: parts == 1 ? '1 part (Single)' : '$parts parts',
+                            icon: const Icon(Icons.layers_outlined, size: 16),
                           );
                         }).toList(),
                         onChanged: (val) {
@@ -205,18 +209,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Speed limit mode
                     ListTile(
-                      leading: const Icon(Icons.speed_outlined),
+                      leading: SpeedLimitIcon(
+                        mode: settings.speedLimitMode,
+                        size: 24,
+                        color: SpeedLimitIcon.getAccentColor(settings.speedLimitMode, theme.colorScheme),
+                      ),
                       title: const Text('Speed Limiter Mode'),
                       subtitle: Text(settings.speedLimitMode == SpeedLimitMode.rocket
                           ? 'Accelerate by distributing parts across proxy servers'
-                          : 'Throttle or uncap bandwidth per task'),
-                      trailing: DropdownButton<SpeedLimitMode>(
+                          : settings.speedLimitMode.description),
+                      trailing: AppAnimatedDropdown<SpeedLimitMode>(
                         value: settings.speedLimitMode,
-                        underline: const SizedBox(),
+                        menuWidth: 260,
                         items: SpeedLimitMode.values.map((mode) {
-                          return DropdownMenuItem(
+                          return AppDropdownItem<SpeedLimitMode>(
                             value: mode,
-                            child: Text(mode.label),
+                            label: mode.label,
+                            subtitle: mode.description,
+                            icon: SpeedLimitIcon(mode: mode, size: 16),
+                            accentColor: SpeedLimitIcon.getAccentColor(mode, theme.colorScheme),
                           );
                         }).toList(),
                         onChanged: (val) {

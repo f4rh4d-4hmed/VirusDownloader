@@ -53,6 +53,20 @@ extension SpeedLimitModeExt on SpeedLimitMode {
     }
   }
 
+  /// Short description explaining the speed limit behavior
+  String get description {
+    switch (this) {
+      case SpeedLimitMode.rabbit:
+        return 'Throttle to 250 KB/s per task';
+      case SpeedLimitMode.turtle:
+        return 'Cap bandwidth at 1 MB/s per task';
+      case SpeedLimitMode.unlimited:
+        return 'Uncapped maximum download speed';
+      case SpeedLimitMode.rocket:
+        return 'Accelerate via proxy servers';
+    }
+  }
+
   /// Returns max bytes per second, or 0 if unlimited / rocket mode handled separately
   int get maxBytesPerSecond {
     switch (this) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/utils.dart';
 import '../../domain/models/proxy_config.dart';
@@ -26,6 +27,29 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
   void _handleAddProxy(SettingsViewModel vm) {
     final text = _proxyInputController.text.trim();
     if (text.isEmpty) return;
+
+    if (text.contains('\n') || text.contains('\r')) {
+      final res = vm.addMultipleProxies(text);
+      if (res.addedCount > 0) {
+        _proxyInputController.clear();
+        setState(() => _inputError = null);
+        final msgParts = <String>['Added ${res.addedCount} ${res.addedCount == 1 ? 'proxy' : 'proxies'}.'];
+        if (res.duplicateCount > 0) msgParts.add('${res.duplicateCount} duplicate(s) skipped.');
+        if (res.failedCount > 0) msgParts.add('${res.failedCount} invalid line(s) skipped.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msgParts.join(' ')),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else if (res.duplicateCount > 0) {
+        setState(() => _inputError = 'All entered proxies already exist in the list.');
+      } else {
+        setState(() => _inputError = 'No valid proxies found.');
+      }
+      return;
+    }
 
     final err = vm.addProxy(text);
     if (err != null) {
@@ -74,6 +98,228 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
     }
   }
 
+  void _confirmClearAll(BuildContext context, SettingsViewModel vm) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All Proxies?'),
+        content: Text(
+          'Are you sure you want to remove all ${vm.settings.proxyServers.length} configured proxy servers?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              vm.clearAllProxies();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('All proxy servers have been removed.'),
+                  duration: Duration(seconds: 2),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBatchAddDialog(BuildContext context, SettingsViewModel vm) {
+    final batchController = TextEditingController();
+    String? localError;
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final theme = Theme.of(context);
+            final text = batchController.text.trim();
+            final lineCount = text.isEmpty
+                ? 0
+                : text
+                    .split(RegExp(r'[\r\n]+'))
+                    .where((l) =>
+                        l.trim().isNotEmpty &&
+                        !l.trim().startsWith('#') &&
+                        !l.trim().startsWith('//'))
+                    .length;
+
+            return AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.playlist_add_rounded, color: theme.colorScheme.primary),
+                  const SizedBox(width: 10),
+                  const Text('Add Multiple Proxies'),
+                ],
+              ),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 550),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Paste proxy servers line by line. Supported formats:\n'
+                      '• socks5://[user:pass@]host:port\n'
+                      '• http://[user:pass@]host:port\n'
+                      '• host:port (defaults to HTTP)',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: batchController,
+                      maxLines: 8,
+                      minLines: 5,
+                      autofocus: true,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                      decoration: InputDecoration(
+                        hintText:
+                            "socks5://127.0.0.1:1080\nhttp://user:pass@192.168.1.50:8080\n10.0.0.1:3128",
+                        hintStyle: TextStyle(
+                          fontFamily: 'monospace',
+                          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                        ),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.all(12),
+                      ),
+                      onChanged: (_) => setDialogState(() {
+                        localError = null;
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          lineCount == 1 ? '1 proxy detected' : '$lineCount proxies detected',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        TextButton.icon(
+                          icon: const Icon(Icons.paste_rounded, size: 16),
+                          label: const Text('Paste Clipboard', style: TextStyle(fontSize: 12)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () async {
+                            final data = await Clipboard.getData(Clipboard.kTextPlain);
+                            if (data != null && data.text != null && data.text!.isNotEmpty) {
+                              final current = batchController.text;
+                              batchController.text = current.isEmpty
+                                  ? data.text!
+                                  : '$current\n${data.text}';
+                              setDialogState(() {
+                                localError = null;
+                              });
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () {
+                            batchController.clear();
+                            setDialogState(() {
+                              localError = null;
+                            });
+                          },
+                          child: const Text('Clear', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                    if (localError != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        localError!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.error,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: Text(lineCount > 0 ? 'Add ($lineCount)' : 'Add All'),
+                  onPressed: () {
+                    final raw = batchController.text.trim();
+                    if (raw.isEmpty) {
+                      setDialogState(() {
+                        localError = 'Please enter at least one proxy.';
+                      });
+                      return;
+                    }
+
+                    final res = vm.addMultipleProxies(raw);
+                    if (res.addedCount == 0) {
+                      if (res.duplicateCount > 0 && res.failedCount == 0) {
+                        setDialogState(() {
+                          localError = 'All entered proxies already exist in the list.';
+                        });
+                        return;
+                      }
+                      setDialogState(() {
+                        localError = 'No valid proxies found. Please check the format.';
+                      });
+                      return;
+                    }
+
+                    Navigator.of(dialogCtx).pop();
+
+                    final msgParts = <String>[];
+                    msgParts.add('Added ${res.addedCount} ${res.addedCount == 1 ? 'proxy' : 'proxies'}.');
+                    if (res.duplicateCount > 0) {
+                      msgParts.add('${res.duplicateCount} duplicate(s) skipped.');
+                    }
+                    if (res.failedCount > 0) {
+                      msgParts.add('${res.failedCount} invalid line(s) skipped.');
+                    }
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(msgParts.join(' ')),
+                        duration: const Duration(seconds: 4),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -103,6 +349,19 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
+                if (proxies.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                    label: const Text('Clear All', style: TextStyle(fontSize: 12)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _confirmClearAll(context, vm),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 4),
@@ -122,7 +381,7 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
                   child: TextField(
                     controller: _proxyInputController,
                     decoration: InputDecoration(
-                      hintText: 'e.g. socks5://127.0.0.1:1080 or http://user:pass@host:port',
+                      hintText: 'e.g. socks5://host:port or http://user:pass@host:port',
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
@@ -136,6 +395,12 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Add'),
                   onPressed: () => _handleAddProxy(vm),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                  label: const Text('Add Multiple'),
+                  onPressed: () => _showBatchAddDialog(context, vm),
                 ),
               ],
             ),
