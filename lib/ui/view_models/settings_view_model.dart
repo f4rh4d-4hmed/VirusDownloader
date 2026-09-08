@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
@@ -273,5 +274,46 @@ class SettingsViewModel extends ChangeNotifier {
       }
     }
     return result;
+  }
+
+  /// Tests all configured proxy servers concurrently with a limit on concurrent tests.
+  Future<Map<String, ProxyBenchmarkResult>> testAllProxies({
+    void Function(int completed, int total, ProxyBenchmarkResult result)? onProgress,
+    int concurrency = 5,
+  }) async {
+    final proxies = settings.proxyServers;
+    if (proxies.isEmpty) return {};
+
+    final service = proxyService ?? ProxyService();
+    final results = <String, ProxyBenchmarkResult>{};
+    int completed = 0;
+
+    for (int i = 0; i < proxies.length; i += concurrency) {
+      final batch = proxies.sublist(i, math.min(i + concurrency, proxies.length));
+      await Future.wait(batch.map((proxy) async {
+        final res = await service.testProxy(proxy, timeout: const Duration(seconds: 4));
+        results[proxy.originalUrl] = res;
+        completed++;
+        onProgress?.call(completed, proxies.length, res);
+      }));
+    }
+
+    return results;
+  }
+
+  /// Removes all proxies matching the given URLs (failed/dead proxies).
+  void removeFailedProxies(Set<String> failedUrls) {
+    if (failedUrls.isEmpty || settings.proxyServers.isEmpty) return;
+    final list = settings.proxyServers
+        .where((p) => !failedUrls.contains(p.originalUrl) && !failedUrls.contains(p.displayUrl))
+        .toList();
+    final updated = settings.copyWith(
+      proxyServers: list,
+      speedLimitMode: list.isEmpty && settings.speedLimitMode == SpeedLimitMode.rocket
+          ? SpeedLimitMode.unlimited
+          : settings.speedLimitMode,
+    );
+    repository.updateSettings(updated);
+    notifyListeners();
   }
 }

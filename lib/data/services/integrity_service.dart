@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -52,6 +53,39 @@ class RecheckResult {
     required this.totalBytes,
     required this.message,
     this.corruptByteOffset,
+  });
+}
+
+class ZeroPiece {
+  final int index;
+  final int startByte;
+  final int endByte;
+
+  const ZeroPiece({
+    required this.index,
+    required this.startByte,
+    required this.endByte,
+  });
+
+  int get length => (endByte - startByte) + 1;
+
+  @override
+  String toString() => 'ZeroPiece(idx: $index, range: $startByte-$endByte, len: $length)';
+}
+
+class RepairResult {
+  final bool isSuccess;
+  final int totalPieces;
+  final int repairedPieces;
+  final int failedPieces;
+  final String message;
+
+  const RepairResult({
+    required this.isSuccess,
+    required this.totalPieces,
+    required this.repairedPieces,
+    required this.failedPieces,
+    required this.message,
   });
 }
 
@@ -337,6 +371,244 @@ class IntegrityService {
       verifiedBytes: targetTotal,
       totalBytes: targetTotal,
       message: 'File integrity verified successfully against remote server.',
+    );
+  }
+
+  /// Scans a local file piece-by-piece to find missing/unwritten zero-filled blocks
+  /// (typical in pre-allocated placeholder files where segments were interrupted).
+  ///
+  /// Uses ultra-fast checking: as soon as any byte in a block is non-zero,
+  /// the piece is skipped immediately.
+  Future<List<ZeroPiece>> findZeroPieces(
+    String filePath, {
+    int pieceSize = 8 * 1024 * 1024, // 8 MB default piece size
+    void Function(double progress, String status)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    final file = File(filePath);
+    if (!await file.exists()) return [];
+
+    final totalSize = await file.length();
+    if (totalSize == 0) return [];
+
+    final numPieces = (totalSize + pieceSize - 1) ~/ pieceSize;
+    final zeroPieces = <ZeroPiece>[];
+    const scanReadSize = 4 * 1024 * 1024; // 4 MB read granularity
+
+    final raf = await file.open(mode: FileMode.read);
+    try {
+      for (int idx = 0; idx < numPieces; idx++) {
+        if (cancelToken?.isCancelled ?? false) break;
+
+        final start = idx * pieceSize;
+        final end = math.min((idx + 1) * pieceSize - 1, totalSize - 1);
+        final length = (end - start) + 1;
+
+        onProgress?.call(
+          idx / numPieces,
+          'Scanning for missing pieces: ${idx + 1}/$numPieces (${AppUtils.formatFileSize(start)})...',
+        );
+
+        await raf.setPosition(start);
+        bool isZero = true;
+        int remaining = length;
+
+        while (remaining > 0) {
+          final readLen = math.min(scanReadSize, remaining);
+          final buffer = await raf.read(readLen);
+          if (buffer.isEmpty) {
+            break;
+          }
+
+          // Ultra-fast zero check: exit on first non-zero byte
+          for (int i = 0; i < buffer.length; i++) {
+            if (buffer[i] != 0) {
+              isZero = false;
+              break;
+            }
+          }
+
+          if (!isZero) break;
+          remaining -= readLen;
+        }
+
+        if (isZero) {
+          zeroPieces.add(ZeroPiece(index: idx, startByte: start, endByte: end));
+        }
+      }
+    } finally {
+      await raf.close();
+    }
+
+    onProgress?.call(1.0, 'Scan complete. Found ${zeroPieces.length} missing piece(s).');
+    return zeroPieces;
+  }
+
+  /// Re-downloads only the specified zero pieces using HTTP Range requests
+  /// and writes them directly into the file in-place at the exact offset.
+  Future<RepairResult> repairZeroPieces({
+    required String url,
+    required String localFilePath,
+    required List<ZeroPiece> pieces,
+    required Dio dio,
+    Map<String, String>? headers,
+    void Function(double progress, String status)? onProgress,
+    CancelToken? cancelToken,
+    int maxRetriesPerPiece = 5,
+  }) async {
+    final file = File(localFilePath);
+    if (!await file.exists()) {
+      return const RepairResult(
+        isSuccess: false,
+        totalPieces: 0,
+        repairedPieces: 0,
+        failedPieces: 0,
+        message: 'File does not exist on disk.',
+      );
+    }
+
+    if (pieces.isEmpty) {
+      return const RepairResult(
+        isSuccess: true,
+        totalPieces: 0,
+        repairedPieces: 0,
+        failedPieces: 0,
+        message: 'No missing pieces to repair.',
+      );
+    }
+
+    int repairedCount = 0;
+    final failedPieces = <ZeroPiece>[];
+
+    // Open file in append/write mode to allow random seeking and in-place writes
+    final raf = await file.open(mode: FileMode.append);
+
+    try {
+      for (int i = 0; i < pieces.length; i++) {
+        if (cancelToken?.isCancelled ?? false) break;
+
+        final piece = pieces[i];
+        final pieceProg = i / pieces.length;
+        onProgress?.call(
+          pieceProg,
+          'Patching piece ${i + 1}/${pieces.length} (${AppUtils.formatFileSize(piece.startByte)} - ${AppUtils.formatFileSize(piece.endByte)})...',
+        );
+
+        final reqHeaders = <String, dynamic>{
+          'range': 'bytes=${piece.startByte}-${piece.endByte}',
+        };
+        if (headers != null) reqHeaders.addAll(headers);
+
+        List<int>? pieceData;
+        int backoffSeconds = 2;
+
+        for (int attempt = 1; attempt <= maxRetriesPerPiece; attempt++) {
+          if (cancelToken?.isCancelled ?? false) break;
+          try {
+            final resp = await dio.get<List<int>>(
+              url,
+              options: Options(
+                responseType: ResponseType.bytes,
+                headers: reqHeaders,
+                validateStatus: (s) => s != null && s >= 200 && s < 400,
+              ),
+              cancelToken: cancelToken,
+            );
+
+            if (resp.statusCode == 429) {
+              await Future.delayed(Duration(seconds: backoffSeconds));
+              backoffSeconds = math.min(backoffSeconds * 2, 30);
+              continue;
+            }
+
+            final data = resp.data;
+            if (data != null && data.length == piece.length) {
+              pieceData = data;
+              break;
+            } else {
+              await Future.delayed(Duration(seconds: backoffSeconds));
+              backoffSeconds = math.min(backoffSeconds * 2, 30);
+            }
+          } catch (e) {
+            await Future.delayed(Duration(seconds: backoffSeconds));
+            backoffSeconds = math.min(backoffSeconds * 2, 30);
+          }
+        }
+
+        if (pieceData != null) {
+          await raf.setPosition(piece.startByte);
+          await raf.writeFrom(pieceData);
+          await raf.flush();
+          repairedCount++;
+        } else {
+          failedPieces.add(piece);
+        }
+      }
+    } finally {
+      await raf.close();
+    }
+
+    final isSuccess = failedPieces.isEmpty;
+    onProgress?.call(
+      1.0,
+      isSuccess
+          ? 'Successfully repaired all $repairedCount piece(s)!'
+          : 'Repaired $repairedCount piece(s), ${failedPieces.length} failed.',
+    );
+
+    return RepairResult(
+      isSuccess: isSuccess,
+      totalPieces: pieces.length,
+      repairedPieces: repairedCount,
+      failedPieces: failedPieces.length,
+      message: isSuccess
+          ? 'Successfully patched all $repairedCount missing piece(s).'
+          : 'Repaired $repairedCount piece(s), ${failedPieces.length} piece(s) failed.',
+    );
+  }
+
+  /// Scans for all-zero gaps and immediately re-downloads & patches them in-place.
+  Future<RepairResult> scanAndRepairZeroGaps({
+    required String url,
+    required String localFilePath,
+    required Dio dio,
+    int pieceSize = 8 * 1024 * 1024,
+    Map<String, String>? headers,
+    void Function(double progress, String status)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    onProgress?.call(0.0, 'Scanning file for missing zero-filled gaps...');
+    final zeroPieces = await findZeroPieces(
+      localFilePath,
+      pieceSize: pieceSize,
+      onProgress: (prog, status) => onProgress?.call(prog * 0.4, status),
+      cancelToken: cancelToken,
+    );
+
+    if (zeroPieces.isEmpty) {
+      onProgress?.call(1.0, 'No missing zero-filled pieces found. File appears complete.');
+      return const RepairResult(
+        isSuccess: true,
+        totalPieces: 0,
+        repairedPieces: 0,
+        failedPieces: 0,
+        message: 'No missing zero-filled pieces found.',
+      );
+    }
+
+    onProgress?.call(
+      0.4,
+      'Found ${zeroPieces.length} missing piece(s). Beginning in-place patch...',
+    );
+
+    return await repairZeroPieces(
+      url: url,
+      localFilePath: localFilePath,
+      pieces: zeroPieces,
+      dio: dio,
+      headers: headers,
+      onProgress: (prog, status) => onProgress?.call(0.4 + prog * 0.6, status),
+      cancelToken: cancelToken,
     );
   }
 }

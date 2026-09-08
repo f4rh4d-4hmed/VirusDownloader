@@ -23,6 +23,7 @@ class RecheckDialog extends StatefulWidget {
 
 class _RecheckDialogState extends State<RecheckDialog> {
   bool _isChecking = true;
+  bool _isRepairing = false;
   double _progress = 0.0;
   String _statusText = 'Starting file integrity recheck...';
   RecheckResult? _result;
@@ -35,6 +36,11 @@ class _RecheckDialogState extends State<RecheckDialog> {
 
   void _startRecheck() async {
     final downloadsVm = context.read<DownloadsViewModel>();
+    setState(() {
+      _isChecking = true;
+      _isRepairing = false;
+    });
+
     try {
       final res = await downloadsVm.recheck(
         widget.task.id,
@@ -71,26 +77,74 @@ class _RecheckDialogState extends State<RecheckDialog> {
     }
   }
 
+  void _startRepair() async {
+    final downloadsVm = context.read<DownloadsViewModel>();
+    setState(() {
+      _isRepairing = true;
+      _isChecking = false;
+      _progress = 0.0;
+      _statusText = 'Scanning file for missing zero-filled gaps...';
+    });
+
+    try {
+      final repairRes = await downloadsVm.scanAndRepairZeroGaps(
+        widget.task.id,
+        onProgress: (prog, status) {
+          if (mounted) {
+            setState(() {
+              _progress = prog;
+              _statusText = status;
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        if (repairRes.isSuccess && repairRes.repairedPieces > 0) {
+          setState(() {
+            _statusText = 'Patched ${repairRes.repairedPieces} piece(s). Re-verifying file...';
+            _progress = 0.0;
+          });
+          // Re-verify file after repair
+          _startRecheck();
+        } else {
+          setState(() {
+            _isRepairing = false;
+            _statusText = repairRes.message;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isRepairing = false;
+          _statusText = 'Repair failed: $e';
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final res = _result;
+    final isBusy = _isChecking || _isRepairing;
 
     return AlertDialog(
       title: Row(
         children: [
           Icon(
-            _isChecking
+            isBusy
                 ? Icons.sync_rounded
                 : (res?.isVerified ?? false
                     ? Icons.verified_rounded
                     : Icons.warning_amber_rounded),
-            color: _isChecking
+            color: isBusy
                 ? theme.colorScheme.primary
                 : (res?.isVerified ?? false ? Colors.green : theme.colorScheme.error),
           ),
           const SizedBox(width: 8),
-          const Text('Recheck File Integrity'),
+          Text(_isRepairing ? 'Repairing Missing Pieces' : 'Recheck File Integrity'),
         ],
       ),
       content: SizedBox(
@@ -107,7 +161,7 @@ class _RecheckDialogState extends State<RecheckDialog> {
             ),
             const SizedBox(height: 16),
 
-            if (_isChecking) ...[
+            if (isBusy) ...[
               LinearProgressIndicator(value: _progress > 0 ? _progress : null),
               const SizedBox(height: 8),
               Text(
@@ -155,20 +209,26 @@ class _RecheckDialogState extends State<RecheckDialog> {
         ),
       ),
       actions: [
-        if (!_isChecking)
+        if (!isBusy)
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
           ),
-        if (!_isChecking && !(res?.isVerified ?? true))
+        if (!isBusy && !(res?.isVerified ?? true)) ...[
+          OutlinedButton.icon(
+            icon: const Icon(Icons.build_circle_outlined, size: 18),
+            label: const Text('Quick-Repair Gaps'),
+            onPressed: _startRepair,
+          ),
           FilledButton.icon(
             icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Retry Download'),
+            label: const Text('Retry Full'),
             onPressed: () {
               Navigator.of(context).pop();
               context.read<DownloadsViewModel>().retry(widget.task.id);
             },
           ),
+        ],
       ],
     );
   }

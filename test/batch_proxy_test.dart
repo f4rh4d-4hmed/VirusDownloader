@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import 'package:virusdownloader/core/enums.dart';
 import 'package:virusdownloader/data/repositories/settings_repository.dart';
 import 'package:virusdownloader/data/services/browser_integration_service.dart';
-import 'package:virusdownloader/data/services/file_service.dart';
 import 'package:virusdownloader/data/services/integration_server_service.dart';
+import 'package:virusdownloader/data/services/proxy_service.dart';
 import 'package:virusdownloader/data/services/storage_service.dart';
 import 'package:virusdownloader/domain/models/app_settings.dart';
 import 'package:virusdownloader/domain/models/proxy_config.dart';
@@ -32,6 +32,27 @@ class MockIntegrationServerService extends ChangeNotifier implements Integration
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class MockProxyService implements ProxyService {
+  @override
+  Future<ProxyBenchmarkResult> testProxy(
+    ProxyConfig proxy, {
+    String testUrl = 'https://www.google.com',
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final isWorking = !proxy.host.contains('dead');
+    return ProxyBenchmarkResult(
+      proxy: proxy,
+      isWorking: isWorking,
+      speedBytesPerSec: isWorking ? 1024000.0 : 0.0,
+      latency: Duration(milliseconds: isWorking ? 120 : 5000),
+      errorMessage: isWorking ? null : 'Connection timed out',
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   late MockStorageService storage;
   late SettingsRepository repository;
@@ -44,6 +65,7 @@ void main() {
       repository: repository,
       browserService: BrowserIntegrationService(),
       integrationServer: MockIntegrationServerService(),
+      proxyService: MockProxyService(),
     );
   });
 
@@ -110,6 +132,34 @@ http://192.168.1.50:8080
       expect(err, isNull);
       expect(vm.settings.proxyServers.length, 2);
     });
+
+    test('testAllProxies tests all proxies and reports progress', () async {
+      vm.addMultipleProxies('http://live.proxy.com:8080\nhttp://dead.proxy.com:8080');
+      expect(vm.settings.proxyServers.length, 2);
+
+      int progressCount = 0;
+      final results = await vm.testAllProxies(
+        onProgress: (completed, total, res) {
+          progressCount++;
+        },
+      );
+
+      expect(results.length, 2);
+      expect(progressCount, 2);
+      expect(results['http://live.proxy.com:8080']?.isWorking, isTrue);
+      expect(results['http://dead.proxy.com:8080']?.isWorking, isFalse);
+    });
+
+    test('removeFailedProxies removes specified dead proxies', () {
+      vm.addMultipleProxies('http://live1.proxy.com:8080\nhttp://dead1.proxy.com:8080\nhttp://live2.proxy.com:8080');
+      expect(vm.settings.proxyServers.length, 3);
+
+      vm.removeFailedProxies({'http://dead1.proxy.com:8080'});
+      expect(vm.settings.proxyServers.length, 2);
+      expect(vm.settings.proxyServers.any((p) => p.host.contains('dead1')), isFalse);
+      expect(vm.settings.proxyServers.any((p) => p.host.contains('live1')), isTrue);
+      expect(vm.settings.proxyServers.any((p) => p.host.contains('live2')), isTrue);
+    });
   });
 
   group('ProxySettingsSection Widget Tests', () {
@@ -155,6 +205,43 @@ http://192.168.1.50:8080
       expect(vm.settings.proxyServers.length, 2);
       expect(find.text('2 configured'), findsOneWidget);
       expect(find.text('Clear All'), findsOneWidget);
+    });
+
+    testWidgets('shows Test All button and removes dead proxies in widget', (tester) async {
+      vm.addMultipleProxies('http://live.proxy.com:8080\nhttp://dead.proxy.com:8080');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChangeNotifierProvider<SettingsViewModel>.value(
+              value: vm,
+              child: const ProxySettingsSection(),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.text('Test All'), findsOneWidget);
+
+      await tester.tap(find.text('Test All'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('OK (120ms)'), findsOneWidget);
+      expect(find.text('Failed'), findsOneWidget);
+      expect(find.textContaining('Remove Dead'), findsOneWidget);
+
+      // Tap Remove Dead
+      await tester.tap(find.textContaining('Remove Dead'));
+      await tester.pumpAndSettle();
+
+      // Dialog opens
+      expect(find.text('Remove Dead Proxies?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Remove Dead'));
+      await tester.pumpAndSettle();
+
+      // Dead proxy removed, only live proxy remains
+      expect(vm.settings.proxyServers.length, 1);
+      expect(find.text('1 configured'), findsOneWidget);
+      expect(find.textContaining('Remove Dead'), findsNothing);
     });
   });
 }

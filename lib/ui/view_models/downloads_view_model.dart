@@ -232,5 +232,19 @@ class DownloadsViewModel extends ChangeNotifier {
     void Function(double progress)? onProgress,
   }) =>
       repository.calculateFileHash(id, algo, onProgress: onProgress);
+
+  Future<RepairResult> scanAndRepairZeroGaps(
+    String id, {
+    int pieceSize = 8 * 1024 * 1024,
+    void Function(double progress, String status)? onProgress,
+  }) =>
+      repository.scanAndRepairZeroGaps(id, pieceSize: pieceSize, onProgress: onProgress);
+
+  Future<List<ZeroPiece>> findZeroPieces(
+    String id, {
+    int pieceSize = 8 * 1024 * 1024,
+    void Function(double progress, String status)? onProgress,
+  }) =>
+      repository.findZeroPieces(id, pieceSize: pieceSize, onProgress: onProgress);
 }
 

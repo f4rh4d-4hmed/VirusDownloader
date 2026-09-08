@@ -388,6 +388,50 @@ class DownloadRepository extends ChangeNotifier {
     );
   }
 
+  /// Scans file for zero-filled piece gaps and patches them in-place
+  Future<RepairResult> scanAndRepairZeroGaps(
+    String id, {
+    int pieceSize = 8 * 1024 * 1024,
+    void Function(double progress, String status)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) throw StateError('Task not found');
+    final task = _tasks[index];
+
+    final service = integrityService ?? IntegrityService();
+    final dio = Dio();
+    return await service.scanAndRepairZeroGaps(
+      url: task.url,
+      localFilePath: task.savePath,
+      dio: dio,
+      pieceSize: pieceSize,
+      headers: task.headers,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+  }
+
+  /// Scans for missing zero pieces without downloading
+  Future<List<ZeroPiece>> findZeroPieces(
+    String id, {
+    int pieceSize = 8 * 1024 * 1024,
+    void Function(double progress, String status)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) throw StateError('Task not found');
+    final task = _tasks[index];
+
+    final service = integrityService ?? IntegrityService();
+    return await service.findZeroPieces(
+      task.savePath,
+      pieceSize: pieceSize,
+      onProgress: onProgress,
+      cancelToken: cancelToken,
+    );
+  }
+
   /// Checks the queue and launches tasks up to the concurrent limit
   void _processQueue() {
     final maxConcurrent = settingsRepo.currentSettings.maxConcurrentDownloads;
@@ -467,6 +511,9 @@ class DownloadRepository extends ChangeNotifier {
           speedLimitMode: settings.speedLimitMode,
           availableProxies: settings.proxyServers,
           headers: task.headers,
+          onStatusMessage: (message) {
+            debugPrint('[Download $taskId] $message');
+          },
           onResumableChecked: ({required bool isResumable}) {
             final idx = _tasks.indexWhere((t) => t.id == taskId);
             if (idx != -1 && _tasks[idx].isResumable != isResumable) {

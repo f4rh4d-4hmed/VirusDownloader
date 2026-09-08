@@ -85,13 +85,14 @@ class ProxyService {
   Future<ProxyBenchmarkResult> testProxy(
     ProxyConfig proxy, {
     String testUrl = 'https://www.google.com',
+    Duration timeout = const Duration(seconds: 5),
   }) async {
     final stopwatch = Stopwatch()..start();
     final dio = createDioWithProxy(
       proxy,
       baseOptions: BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 10),
+        connectTimeout: timeout,
+        receiveTimeout: timeout,
       ),
     );
 

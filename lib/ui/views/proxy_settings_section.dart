@@ -17,6 +17,10 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
   String? _inputError;
   final Map<int, String> _testResults = {};
   final Map<int, bool> _testingIndices = {};
+  bool _isTestingAll = false;
+  int _testAllCompleted = 0;
+  int _testAllTotal = 0;
+  final Set<String> _failedUrls = {};
 
   @override
   void dispose() {
@@ -72,11 +76,111 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
         _testingIndices[index] = false;
         if (res != null && res.isWorking) {
           _testResults[index] = 'OK (${res.latency.inMilliseconds}ms)';
+          _failedUrls.remove(proxy.originalUrl);
+          _failedUrls.remove(proxy.displayUrl);
         } else {
           _testResults[index] = 'Failed';
+          _failedUrls.add(proxy.originalUrl);
+          _failedUrls.add(proxy.displayUrl);
         }
       });
     }
+  }
+
+  void _handleTestAll(SettingsViewModel vm) async {
+    final proxies = vm.settings.proxyServers;
+    if (proxies.isEmpty || _isTestingAll) return;
+
+    setState(() {
+      _isTestingAll = true;
+      _testAllCompleted = 0;
+      _testAllTotal = proxies.length;
+      _failedUrls.clear();
+      _testResults.clear();
+    });
+
+    int workingCount = 0;
+    int failedCount = 0;
+
+    await vm.testAllProxies(
+      onProgress: (completed, total, res) {
+        if (!mounted) return;
+        final idx = vm.settings.proxyServers.indexWhere(
+          (p) => p.originalUrl == res.proxy.originalUrl || p.displayUrl == res.proxy.displayUrl,
+        );
+        setState(() {
+          _testAllCompleted = completed;
+          if (idx != -1) {
+            if (res.isWorking) {
+              _testResults[idx] = 'OK (${res.latency.inMilliseconds}ms)';
+              workingCount++;
+            } else {
+              _testResults[idx] = 'Failed';
+              _failedUrls.add(res.proxy.originalUrl);
+              _failedUrls.add(res.proxy.displayUrl);
+              failedCount++;
+            }
+          }
+        });
+      },
+    );
+
+    if (mounted) {
+      setState(() {
+        _isTestingAll = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Testing completed: $workingCount working, $failedCount failed.',
+          ),
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _handleRemoveFailed(BuildContext context, SettingsViewModel vm) {
+    if (_failedUrls.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Dead Proxies?'),
+        content: const Text(
+          'Are you sure you want to remove all unreachable/failed proxies from your list?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              vm.removeFailedProxies(_failedUrls);
+              setState(() {
+                _failedUrls.clear();
+                _testResults.clear();
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Unreachable proxies have been removed.'),
+                  duration: Duration(seconds: 3),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+            child: const Text('Remove Dead'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _benchmarkProxy(SettingsViewModel vm, int index, ProxyConfig proxy) async {
@@ -332,36 +436,93 @@ class _ProxySettingsSectionState extends State<ProxySettingsSection> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                const Icon(Icons.hub_outlined, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Proxy Servers',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${proxies.length} configured',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                if (proxies.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                    label: const Text('Clear All', style: TextStyle(fontSize: 12)),
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.colorScheme.error,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      visualDensity: VisualDensity.compact,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.hub_outlined, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Proxy Servers',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    onPressed: () => _confirmClearAll(context, vm),
-                  ),
-                ],
+                  ],
+                ),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    if (_isTestingAll) ...[
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: _testAllTotal > 0 ? _testAllCompleted / _testAllTotal : null,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '$_testAllCompleted/$_testAllTotal tested',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        '${proxies.length} configured',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (proxies.isNotEmpty && !_isTestingAll) ...[
+                      TextButton.icon(
+                        icon: const Icon(Icons.network_check_rounded, size: 16),
+                        label: const Text('Test All', style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () => _handleTestAll(vm),
+                      ),
+                      if (_failedUrls.isNotEmpty) ...[
+                        TextButton.icon(
+                          icon: const Icon(Icons.filter_alt_off_outlined, size: 16),
+                          label: Text(
+                            'Remove Dead (${_failedUrls.length ~/ 2 > 0 ? _failedUrls.length ~/ 2 : _failedUrls.length})',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: theme.colorScheme.error,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: () => _handleRemoveFailed(context, vm),
+                        ),
+                      ],
+                      TextButton.icon(
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                        label: const Text('Clear All', style: TextStyle(fontSize: 12)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: theme.colorScheme.error,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        onPressed: () => _confirmClearAll(context, vm),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 4),

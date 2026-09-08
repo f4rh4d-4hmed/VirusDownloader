@@ -47,6 +47,46 @@ class SegmentWorkerState {
       );
 }
 
+/// Dynamic proxy pool for Rocket Mode.
+/// Dispenses candidate proxies, tracks dead or slow proxies, and rotates dynamically.
+class DynamicProxyPool {
+  final List<ProxyConfig> _candidates;
+  final Set<String> _deadOrSlowProxies = {};
+  int _nextIndex = 0;
+
+  DynamicProxyPool(List<ProxyConfig> proxies)
+      : _candidates = List.of(proxies) {
+    // Sort candidates: proxies with verified positive benchmark speed come first
+    _candidates.sort((a, b) {
+      final sA = a.lastBenchmarkSpeed ?? 0.0;
+      final sB = b.lastBenchmarkSpeed ?? 0.0;
+      return sB.compareTo(sA);
+    });
+  }
+
+  bool get isEmpty => _candidates.isEmpty;
+  int get candidateCount => _candidates.length;
+  int get deadOrSlowCount => _deadOrSlowProxies.length;
+
+  /// Acquires the next available candidate proxy that has not been marked slow or dead.
+  ProxyConfig? acquireNext() {
+    while (_nextIndex < _candidates.length) {
+      final p = _candidates[_nextIndex++];
+      if (!_deadOrSlowProxies.contains(p.originalUrl) &&
+          !_deadOrSlowProxies.contains(p.displayUrl)) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  /// Marks a proxy as slow, stalled, or dead so it won't be reused.
+  void markSlowOrDead(ProxyConfig proxy, {String? reason}) {
+    _deadOrSlowProxies.add(proxy.originalUrl);
+    _deadOrSlowProxies.add(proxy.displayUrl);
+  }
+}
+
 class SegmentedDownloadService {
   final ProxyService proxyService;
   final FileService fileService;
@@ -119,7 +159,7 @@ class SegmentedDownloadService {
     onResumableChecked?.call(isResumable: isResumable);
 
     // If server does not support byte ranges or size is unknown, fallback to single stream
-    if (!isResumable || totalBytes <= 0 || workerCount <= 1) {
+    if (!isResumable || totalBytes <= 0 || (workerCount <= 1 && speedLimitMode != SpeedLimitMode.rocket)) {
       final singleService = HttpDownloadService();
       await singleService.downloadFile(
         url: url,
@@ -154,29 +194,17 @@ class SegmentedDownloadService {
       }
     }
 
-    // 3. Worker Distribution & Rocket Mode
-    final clampedWorkers = workerCount.clamp(1, 16);
+    // 3. Worker Distribution & Dynamic Proxy Pool for Rocket Mode
+    final clampedWorkers = (speedLimitMode == SpeedLimitMode.rocket && availableProxies.isNotEmpty)
+        ? math.max(4, workerCount).clamp(1, 16)
+        : workerCount.clamp(1, 16);
     final workerList = <SegmentWorkerState>[];
+    final proxyPool = DynamicProxyPool(availableProxies);
 
-    List<ProxyConfig> rankedProxies = [];
     if (speedLimitMode == SpeedLimitMode.rocket && availableProxies.isNotEmpty) {
-      onStatusMessage?.call('Rocket mode: Benchmarking proxy servers...');
-      // Benchmark top proxies using the actual download file URL
-      final benchmarkResults = <ProxyBenchmarkResult>[];
-      for (final p in availableProxies) {
-        if (cancelToken.isCancelled) break;
-        final result = await proxyService.benchmarkProxy(
-          proxy: p,
-          downloadUrl: url,
-          expectedTotalBytes: totalBytes,
-          cancelToken: cancelToken,
-        );
-        if (result.isWorking) {
-          benchmarkResults.add(result);
-        }
-      }
-      benchmarkResults.sort((a, b) => b.speedBytesPerSec.compareTo(a.speedBytesPerSec));
-      rankedProxies = benchmarkResults.map((r) => r.proxy).toList();
+      onStatusMessage?.call(
+        'Rocket mode: Active with ${availableProxies.length} proxies (in-flight testing & auto-handover enabled).',
+      );
     }
 
     // Check for existing metadata (resuming segmented download)
@@ -211,10 +239,11 @@ class SegmentedDownloadService {
         if (start > totalBytes - 1) break;
 
         ProxyConfig? assignedProxy;
-        if (speedLimitMode == SpeedLimitMode.rocket && rankedProxies.isNotEmpty) {
-          // Reserve first 1 or 2 workers for direct connection
-          if (i >= 2) {
-            assignedProxy = rankedProxies[(i - 2) % rankedProxies.length];
+        if (speedLimitMode == SpeedLimitMode.rocket && availableProxies.isNotEmpty) {
+          // Worker 0 is always direct connection for maximum stability and baseline throughput.
+          // Remaining workers acquire candidate proxies from the pool.
+          if (i >= 1) {
+            assignedProxy = proxyPool.acquireNext();
           }
         }
 
@@ -266,10 +295,20 @@ class SegmentedDownloadService {
     double currentSpeed = 0.0;
     final maxSpeed = speedLimitMode.maxBytesPerSecond;
 
-    // Mutex write queue for safe parallel writes to file
-    Future<void> writeChunk(int writeOffset, List<int> chunk) async {
-      await raf.setPosition(writeOffset);
-      await raf.writeFrom(chunk);
+    // Mutex write queue for safe sequential writes to file
+    Future<void> writeQueue = Future.value();
+    Future<void> writeChunk(int writeOffset, List<int> chunk) {
+      final completer = Completer<void>();
+      writeQueue = writeQueue.then((_) async {
+        try {
+          await raf.setPosition(writeOffset);
+          await raf.writeFrom(chunk);
+          completer.complete();
+        } catch (e, st) {
+          completer.completeError(e, st);
+        }
+      });
+      return completer.future;
     }
 
     // Launch all workers
@@ -279,78 +318,156 @@ class SegmentedDownloadService {
       if (worker.isFinished) continue;
 
       workerFutures.add(() async {
-        final workerDio = proxyService.createDioWithProxy(worker.proxy);
-        final startRange = worker.currentOffset;
-        final endRange = worker.endByte;
+        ProxyConfig? currentProxy = worker.proxy;
+        if (currentProxy == null &&
+            speedLimitMode == SpeedLimitMode.rocket &&
+            availableProxies.isNotEmpty &&
+            worker.index >= 1) {
+          currentProxy = proxyPool.acquireNext();
+        }
 
-        if (startRange > endRange) return;
+        int directRetries = 0;
 
-        final reqHeaders = <String, dynamic>{
-          'range': 'bytes=$startRange-$endRange',
-        };
-        if (headers != null) reqHeaders.addAll(headers);
+        while (worker.currentOffset <= worker.endByte && !cancelToken.isCancelled) {
+          final startRange = worker.currentOffset;
+          final endRange = worker.endByte;
+          if (startRange > endRange) break;
 
-        Response<ResponseBody> resp;
-        try {
-          resp = await workerDio.get<ResponseBody>(
-            url,
-            options: Options(
-              responseType: ResponseType.stream,
-              headers: reqHeaders,
-              validateStatus: (s) => s != null && s >= 200 && s < 400,
+          final reqHeaders = <String, dynamic>{
+            'range': 'bytes=$startRange-$endRange',
+          };
+          if (headers != null) reqHeaders.addAll(headers);
+
+          final dio = proxyService.createDioWithProxy(
+            currentProxy,
+            baseOptions: BaseOptions(
+              connectTimeout: currentProxy != null
+                  ? const Duration(seconds: 5)
+                  : const Duration(seconds: 15),
+              receiveTimeout: currentProxy != null
+                  ? const Duration(seconds: 12)
+                  : const Duration(seconds: 30),
             ),
-            cancelToken: cancelToken,
           );
-        } catch (e) {
-          if (worker.proxy != null) {
-            // Rocket Mode fallback: retry worker with direct connection
-            debugPrint('Worker ${worker.index} proxy failed, falling back to direct: $e');
-            final directDio = proxyService.createDioWithProxy(null);
-            resp = await directDio.get<ResponseBody>(
+
+          final requestCancelToken = CancelToken();
+          void onParentCancel() {
+            if (!requestCancelToken.isCancelled) {
+              requestCancelToken.cancel('Parent cancelled');
+            }
+          }
+
+          cancelToken.whenCancel.then((_) => onParentCancel());
+
+          bool shouldRotateProxy = false;
+          String? failureReason;
+          final sessionWatch = Stopwatch()..start();
+          int bytesInSession = 0;
+
+          try {
+            final resp = await dio.get<ResponseBody>(
               url,
               options: Options(
                 responseType: ResponseType.stream,
                 headers: reqHeaders,
                 validateStatus: (s) => s != null && s >= 200 && s < 400,
               ),
-              cancelToken: cancelToken,
+              cancelToken: requestCancelToken,
             );
-          } else {
-            rethrow;
-          }
-        }
 
-        final stream = resp.data!.stream;
-        await for (final chunk in stream) {
+            final stream = resp.data?.stream;
+            if (stream == null) {
+              throw Exception('Empty response stream');
+            }
+
+            final stallTimeout = currentProxy != null
+                ? const Duration(seconds: 6)
+                : const Duration(seconds: 15);
+
+            await for (final chunk in stream.timeout(stallTimeout)) {
+              if (cancelToken.isCancelled) break;
+
+              final offset = worker.currentOffset;
+              await writeChunk(offset, chunk);
+
+              worker.downloadedBytes += chunk.length;
+              totalDownloaded += chunk.length;
+              bytesInSession += chunk.length;
+
+              // Slowness check for proxy workers in Rocket mode:
+              // After warmup (>= 2.5s elapsed and at least 64KB transferred)
+              if (currentProxy != null && speedLimitMode == SpeedLimitMode.rocket) {
+                final elapsedSec = sessionWatch.elapsedMilliseconds / 1000.0;
+                if (elapsedSec >= 2.5 && bytesInSession >= 64 * 1024) {
+                  final proxySpeed = bytesInSession / elapsedSec;
+                  // If proxy is slower than 80 KB/s, terminate it so next proxy takes over
+                  if (proxySpeed < 80 * 1024) {
+                    failureReason = 'Speed too slow (${AppUtils.formatSpeed(proxySpeed)})';
+                    shouldRotateProxy = true;
+                    requestCancelToken.cancel(failureReason);
+                    break;
+                  }
+                }
+              }
+
+              // Speed Limiter throttle check
+              if (maxSpeed > 0 && currentSpeed > maxSpeed) {
+                final overRatio = (currentSpeed - maxSpeed) / maxSpeed;
+                final pauseMs = (overRatio * 50).clamp(10, 100).toInt();
+                await Future.delayed(Duration(milliseconds: pauseMs));
+              }
+
+              // Throttle UI update every ~350ms
+              final now = DateTime.now();
+              final elapsed = now.difference(lastSampleTime).inMilliseconds;
+              if (elapsed >= 350) {
+                final delta = totalDownloaded - lastSampleBytes;
+                currentSpeed = (delta / elapsed) * 1000.0;
+                lastSampleBytes = totalDownloaded;
+                lastSampleTime = now;
+
+                onProgress(
+                  downloadedBytes: totalDownloaded,
+                  totalBytes: totalBytes,
+                  speedBytesPerSec: currentSpeed,
+                );
+              }
+            }
+
+            directRetries = 0;
+          } catch (e) {
+            if (cancelToken.isCancelled) break;
+            shouldRotateProxy = true;
+            failureReason = e is TimeoutException
+                ? 'Proxy stalled (no data for 6s)'
+                : (failureReason ?? e.toString());
+          }
+
           if (cancelToken.isCancelled) break;
 
-          final offset = worker.currentOffset;
-          await writeChunk(offset, chunk);
+          if (shouldRotateProxy && currentProxy != null) {
+            proxyPool.markSlowOrDead(currentProxy, reason: failureReason);
+            final oldProxyUrl = currentProxy.displayUrl;
+            final nextProxy = proxyPool.acquireNext();
+            currentProxy = nextProxy;
 
-          worker.downloadedBytes += chunk.length;
-          totalDownloaded += chunk.length;
-
-          // Speed Limiter throttle check
-          if (maxSpeed > 0 && currentSpeed > maxSpeed) {
-            final overRatio = (currentSpeed - maxSpeed) / maxSpeed;
-            final pauseMs = (overRatio * 50).clamp(10, 100).toInt();
-            await Future.delayed(Duration(milliseconds: pauseMs));
-          }
-
-          // Throttle UI update every ~350ms
-          final now = DateTime.now();
-          final elapsed = now.difference(lastSampleTime).inMilliseconds;
-          if (elapsed >= 350) {
-            final delta = totalDownloaded - lastSampleBytes;
-            currentSpeed = (delta / elapsed) * 1000.0;
-            lastSampleBytes = totalDownloaded;
-            lastSampleTime = now;
-
-            onProgress(
-              downloadedBytes: totalDownloaded,
-              totalBytes: totalBytes,
-              speedBytesPerSec: currentSpeed,
-            );
+            if (nextProxy != null) {
+              onStatusMessage?.call(
+                'Worker ${worker.index + 1}: Proxy $oldProxyUrl slow/died ($failureReason). Rotating to ${nextProxy.displayUrl}...',
+              );
+            } else {
+              onStatusMessage?.call(
+                'Worker ${worker.index + 1}: Proxy pool exhausted. Resuming remainder with direct connection...',
+              );
+            }
+            await Future.delayed(const Duration(milliseconds: 100));
+          } else if (shouldRotateProxy && currentProxy == null) {
+            // Direct connection had an issue
+            directRetries++;
+            if (directRetries > 4) {
+              throw Exception('Direct worker connection failed after multiple retries: $failureReason');
+            }
+            await Future.delayed(Duration(milliseconds: 300 * directRetries));
           }
         }
       }());
