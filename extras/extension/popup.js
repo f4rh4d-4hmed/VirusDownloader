@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               url: item.url,
               fileName: item.fileName,
               headers: headers,
-              category: item.category || 'videos'
+              category: item.category || 'other'
             }
           }, (res) => {
             sendBtn.disabled = false;

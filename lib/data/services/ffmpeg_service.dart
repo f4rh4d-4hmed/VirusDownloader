@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -290,5 +291,106 @@ class FfmpegService {
 
     final result = await Process.run(ffmpegPath, args);
     return result.exitCode == 0;
+  }
+
+  /// Generates a snapshot thumbnail image from a video file at 1s (or 0s)
+  /// Returns the path to the cached thumbnail JPEG, or null if FFmpeg is unavailable.
+  Future<String?> generateVideoThumbnail(String videoPath) async {
+    try {
+      if (!await File(videoPath).exists()) return null;
+
+      final tempDir = await getTemporaryDirectory();
+      final thumbsDir = Directory(p.join(tempDir.path, 'vdown_thumbs'));
+      if (!await thumbsDir.exists()) {
+        await thumbsDir.create(recursive: true);
+      }
+
+      final hash = md5.convert(utf8.encode(videoPath)).toString();
+      final thumbPath = p.join(thumbsDir.path, '$hash.jpg');
+      final thumbFile = File(thumbPath);
+
+      if (await thumbFile.exists() && (await thumbFile.length()) > 0) {
+        return thumbPath;
+      }
+
+      final ffmpegPath = await getFfmpegPath() ?? await downloadLightweightFfmpeg();
+      if (ffmpegPath == null) return null;
+
+      // First attempt at 1 second
+      var result = await Process.run(ffmpegPath, [
+        '-ss',
+        '00:00:01',
+        '-i',
+        videoPath,
+        '-vframes',
+        '1',
+        '-q:v',
+        '3',
+        '-y',
+        thumbPath,
+      ]);
+
+      if (result.exitCode != 0 || !await thumbFile.exists() || (await thumbFile.length()) == 0) {
+        // Fallback attempt at 0 second
+        result = await Process.run(ffmpegPath, [
+          '-ss',
+          '00:00:00',
+          '-i',
+          videoPath,
+          '-vframes',
+          '1',
+          '-q:v',
+          '3',
+          '-y',
+          thumbPath,
+        ]);
+      }
+
+      if (result.exitCode == 0 && await thumbFile.exists() && (await thumbFile.length()) > 0) {
+        return thumbPath;
+      }
+    } catch (e) {
+      debugPrint('Error generating video thumbnail: $e');
+    }
+    return null;
+  }
+
+  /// Extracts basic media information (duration, resolution, codecs) via FFmpeg
+  Future<Map<String, String>> getVideoInfo(String videoPath) async {
+    final info = <String, String>{};
+    try {
+      final ffmpegPath = await getFfmpegPath() ?? await downloadLightweightFfmpeg();
+      if (ffmpegPath == null) return info;
+
+      final result = await Process.run(ffmpegPath, ['-hide_banner', '-i', videoPath]);
+      final output = '${result.stderr}\n${result.stdout}';
+
+      // Duration: 00:01:23.45
+      final durMatch = RegExp(r'Duration:\s*(\d{2}:\d{2}:\d{2}(?:\.\d+)?)').firstMatch(output);
+      if (durMatch != null) {
+        info['duration'] = durMatch.group(1)!.split('.').first; // format: HH:MM:SS
+      }
+
+      // Resolution: 1920x1080
+      final resMatch = RegExp(r', (\d{3,5}x\d{3,5})').firstMatch(output);
+      if (resMatch != null) {
+        info['resolution'] = resMatch.group(1)!;
+      }
+
+      // Video codec
+      final vCodecMatch = RegExp(r'Video:\s*([a-zA-Z0-9_\-]+)').firstMatch(output);
+      if (vCodecMatch != null) {
+        info['videoCodec'] = vCodecMatch.group(1)!;
+      }
+
+      // Audio codec
+      final aCodecMatch = RegExp(r'Audio:\s*([a-zA-Z0-9_\-]+)').firstMatch(output);
+      if (aCodecMatch != null) {
+        info['audioCodec'] = aCodecMatch.group(1)!;
+      }
+    } catch (e) {
+      debugPrint('Error extracting video info: $e');
+    }
+    return info;
   }
 }

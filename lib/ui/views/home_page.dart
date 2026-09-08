@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/enums.dart';
 import '../../core/utils.dart';
+import '../../data/services/ffmpeg_service.dart';
 import '../../data/services/file_service.dart';
 import '../../data/services/http_download_service.dart';
 import '../../domain/models/download_task.dart';
@@ -14,6 +15,7 @@ import 'add_download_dialog.dart';
 import 'change_download_link_dialog.dart';
 import 'download_tile.dart';
 import 'empty_state.dart';
+import 'file_preview_dialog.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
 import 'settings_page.dart';
@@ -228,6 +230,20 @@ class _HomePageState extends State<HomePage> {
     for (final path in paths) {
       fileService.openContainingFolder(path);
     }
+  }
+
+  void _openPreviewDialog(BuildContext context, DownloadTask task) {
+    FfmpegService? ffmpeg;
+    try {
+      ffmpeg = context.read<FfmpegService>();
+    } catch (_) {}
+
+    FilePreviewDialog.show(
+      context,
+      task: task,
+      fileService: context.read<FileService>(),
+      ffmpegService: ffmpeg,
+    );
   }
 
   void _openSelectedFiles(List<DownloadTask> selectedTasks, FileService fileService) {
@@ -595,6 +611,11 @@ class _HomePageState extends State<HomePage> {
     final canHash = selectedTasks.length == 1 &&
         selectedTasks.first.status == DownloadStatus.completed;
 
+    final canPreview = selectedTasks.length == 1 &&
+        selectedTasks.first.status == DownloadStatus.completed &&
+        (AppUtils.canPreview(selectedTasks.first.savePath) ||
+            AppUtils.canPreview(selectedTasks.first.fileName));
+
     if (_showSearch) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -666,6 +687,7 @@ class _HomePageState extends State<HomePage> {
         canChangeLink: canChangeLink,
         canRecheck: canRecheck,
         canHash: canHash,
+        canPreview: canPreview,
       );
     }
 
@@ -680,6 +702,7 @@ class _HomePageState extends State<HomePage> {
       canChangeLink: canChangeLink,
       canRecheck: canRecheck,
       canHash: canHash,
+      canPreview: canPreview,
     );
   }
 
@@ -694,6 +717,7 @@ class _HomePageState extends State<HomePage> {
     required bool canChangeLink,
     required bool canRecheck,
     required bool canHash,
+    required bool canPreview,
   }) {
     final theme = Theme.of(context);
     final fileService = context.read<FileService>();
@@ -796,6 +820,14 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(width: 6),
                 ],
+                if (canPreview) ...[
+                  _buildActionIconButton(
+                    icon: Icons.visibility_outlined,
+                    tooltip: 'Preview',
+                    onPressed: () => _openPreviewDialog(context, selectedTasks.first),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 if (canOpenFile) ...[
                   _buildActionIconButton(
                     icon: Icons.file_open_outlined,
@@ -879,6 +911,7 @@ class _HomePageState extends State<HomePage> {
     required bool canChangeLink,
     required bool canRecheck,
     required bool canHash,
+    required bool canPreview,
   }) {
     final theme = Theme.of(context);
     final fileService = context.read<FileService>();
@@ -958,6 +991,12 @@ class _HomePageState extends State<HomePage> {
                     icon: Icons.play_arrow_rounded,
                     tooltip: 'Resume',
                     onPressed: canResume ? () => _resumeSelected(selectedTasks, vm) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.visibility_outlined,
+                    tooltip: 'Preview',
+                    onPressed: canPreview ? () => _openPreviewDialog(context, selectedTasks.first) : null,
                   ),
                   const SizedBox(width: 6),
                   _buildActionIconButton(

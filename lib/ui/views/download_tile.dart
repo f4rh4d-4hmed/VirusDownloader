@@ -1,12 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../../core/enums.dart';
 import '../../core/theme.dart';
 import '../../core/utils.dart';
+import '../../data/services/ffmpeg_service.dart';
 import '../../data/services/file_service.dart';
 import '../../data/services/http_download_service.dart';
 import '../../domain/models/download_task.dart';
 import 'change_download_link_dialog.dart';
+import 'file_preview_dialog.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
 
@@ -105,6 +109,20 @@ class _DownloadTileState extends State<DownloadTile> {
       }
       _activeMenuRoute = null;
     }
+  }
+
+  void _openPreview(BuildContext context) {
+    FfmpegService? ffmpeg;
+    try {
+      ffmpeg = context.read<FfmpegService>();
+    } catch (_) {}
+
+    FilePreviewDialog.show(
+      context,
+      task: widget.task,
+      fileService: widget.fileService,
+      ffmpegService: ffmpeg,
+    );
   }
 
   @override
@@ -225,6 +243,17 @@ class _DownloadTileState extends State<DownloadTile> {
           ),
         ),
       ] else if (task.status == DownloadStatus.completed) ...[
+        if (AppUtils.canPreview(task.savePath) || AppUtils.canPreview(task.fileName))
+          const PopupMenuItem(
+            value: 'preview',
+            child: Row(
+              children: [
+                Icon(Icons.visibility_outlined, size: 18),
+                SizedBox(width: 10),
+                Expanded(child: Text('Preview')),
+              ],
+            ),
+          ),
         const PopupMenuItem(
           value: 'open_file',
           child: Row(
@@ -381,6 +410,9 @@ class _DownloadTileState extends State<DownloadTile> {
             widget.task.status != DownloadStatus.cancelled) {
           widget.onCancel();
         }
+        break;
+      case 'preview':
+        _openPreview(context);
         break;
       case 'open_file':
         if (widget.task.status == DownloadStatus.completed) {
@@ -554,17 +586,38 @@ class _DownloadTileState extends State<DownloadTile> {
                           child: Stack(
                             alignment: Alignment.bottomRight,
                             children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.surfaceContainerHighest,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  categoryIcon,
-                                  size: 22,
-                                  color: theme.colorScheme.onSurfaceVariant,
+                              InkWell(
+                                onTap: (widget.task.status == DownloadStatus.completed &&
+                                        (AppUtils.canPreview(widget.task.savePath) ||
+                                            AppUtils.canPreview(widget.task.fileName)))
+                                    ? () => _openPreview(context)
+                                    : null,
+                                borderRadius: BorderRadius.circular(10),
+                                child: Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: (widget.task.status == DownloadStatus.completed &&
+                                          AppUtils.isImageFormat(widget.task.savePath) &&
+                                          File(widget.task.savePath).existsSync())
+                                      ? Image.file(
+                                          File(widget.task.savePath),
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) => Icon(
+                                            categoryIcon,
+                                            size: 22,
+                                            color: theme.colorScheme.onSurfaceVariant,
+                                          ),
+                                        )
+                                      : Icon(
+                                          categoryIcon,
+                                          size: 22,
+                                          color: theme.colorScheme.onSurfaceVariant,
+                                        ),
                                 ),
                               ),
                               Container(
@@ -799,13 +852,21 @@ class _DownloadTileState extends State<DownloadTile> {
             onPressed: widget.onRetry,
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           )
-        else if (task.status == DownloadStatus.completed)
+        else if (task.status == DownloadStatus.completed) ...[
+          if (AppUtils.canPreview(task.savePath) || AppUtils.canPreview(task.fileName))
+            IconButton(
+              icon: const Icon(Icons.visibility_outlined, size: 20),
+              tooltip: 'Preview',
+              onPressed: () => _openPreview(context),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            ),
           IconButton(
             icon: const Icon(Icons.folder_open_outlined, size: 20),
             tooltip: 'Open Folder',
             onPressed: () => widget.fileService.openContainingFolder(task.savePath),
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           ),
+        ],
 
         // 3-dot Options Menu Button
         PopupMenuButton<String>(

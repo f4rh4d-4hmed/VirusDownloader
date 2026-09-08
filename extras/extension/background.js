@@ -56,17 +56,63 @@ function extractFileName(url, defaultName = 'download.mp4') {
 }
 
 // Determine media category matching VirusDownloader enums
-function getMediaCategory(url, mime = '') {
-  const lowerUrl = url.toLowerCase();
-  const lowerMime = mime.toLowerCase();
-  if (lowerUrl.includes('.m3u8') || lowerMime.includes('mpegurl')) return 'videos';
-  if (lowerUrl.includes('.mpd') || lowerMime.includes('dash+xml')) return 'videos';
-  if (lowerMime.startsWith('audio/') || /\.(mp3|aac|m4a|ogg|wav|opus)(\?.*)?$/i.test(lowerUrl)) return 'audio';
-  if (lowerMime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)(\?.*)?$/i.test(lowerUrl)) return 'images';
-  if (/\.(zip|rar|7z|tar|gz|bz2|xz|iso)(\?.*)?$/i.test(lowerUrl)) return 'compressed';
-  if (/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|epub)(\?.*)?$/i.test(lowerUrl)) return 'documents';
-  if (/\.(exe|msi|dmg|pkg|apk|deb|rpm)(\?.*)?$/i.test(lowerUrl)) return 'programs';
-  return 'videos';
+function getMediaCategory(url, mime = '', filename = '') {
+  const target = (filename || '').trim() || (url || '').trim();
+  let clean = target.split('?')[0].split('#')[0];
+  if (clean.includes('/') || clean.includes('\\')) {
+    clean = clean.split(/[/\\]/).pop();
+  }
+  const lowerName = clean.toLowerCase();
+  const lowerUrl = (url || '').toLowerCase();
+  const lowerMime = (mime || '').toLowerCase();
+
+  // Streams
+  if (lowerUrl.includes('.m3u8') || lowerName.endsWith('.m3u8') || lowerMime.includes('mpegurl')) return 'videos';
+  if (lowerUrl.includes('.mpd') || lowerName.endsWith('.mpd') || lowerMime.includes('dash+xml')) return 'videos';
+
+  // 1. Compressed / Archives (Check early to prevent .com.rar or .apk issues)
+  if (/\.(zip|rar|7z|tar|gz|gzip|bz2|bzip2|xz|zst|iso|img|dmg|vhd|tgz|tbz|tbz2|txz|cab|arj|lzh|ace|pak)$/i.test(lowerName) ||
+      /\.(zip|rar|7z|tar|gz|bz2|xz|iso)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.includes('zip') || lowerMime.includes('rar') || lowerMime.includes('7z') || lowerMime.includes('tar') || lowerMime.includes('compressed')) {
+    return 'compressed';
+  }
+
+  // 2. Programs / Executables
+  if (/\.(exe|msi|msix|appx|apk|xapk|apks|aab|deb|rpm|appimage|bat|cmd|com|scr|reg|vbs|ps1|run|bin|jar)$/i.test(lowerName) ||
+      /\.(exe|msi|apk|deb|rpm|appimage)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.includes('x-msdownload') || lowerMime.includes('android.package') || lowerMime.includes('x-executable')) {
+    return 'programs';
+  }
+
+  // 3. Audio
+  if (/\.(mp3|aac|m4a|ogg|oga|wav|flac|wma|opus|alac|aiff|mid|midi)$/i.test(lowerName) ||
+      /\.(mp3|aac|m4a|ogg|wav|flac|opus)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.startsWith('audio/')) {
+    return 'audio';
+  }
+
+  // 4. Images
+  if (/\.(jpg|jpeg|jpe|jfif|png|gif|webp|bmp|dib|svg|ico|tiff|tif|heic|heif|avif|psd|ai)$/i.test(lowerName) ||
+      /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|heic|avif)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.startsWith('image/')) {
+    return 'images';
+  }
+
+  // 5. Videos
+  if (/\.(mp4|m4v|mkv|webm|avi|mov|qt|wmv|flv|f4v|mpg|mpeg|m2v|ts|mts|3gp|rm|rmvb|asf|vob)$/i.test(lowerName) ||
+      /\.(mp4|m4v|mkv|webm|avi|mov|wmv|flv)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.startsWith('video/')) {
+    return 'videos';
+  }
+
+  // 6. Documents
+  if (/\.(pdf|doc|docx|rtf|txt|text|odt|pages|xls|xlsx|csv|tsv|ods|numbers|ppt|pptx|odp|key|epub|mobi|azw|djvu|md|html|htm|xml|json|yaml|yml|log)$/i.test(lowerName) ||
+      /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|epub)(\?.*)?$/i.test(lowerUrl) ||
+      lowerMime.includes('pdf') || lowerMime.includes('document') || lowerMime.includes('sheet') || lowerMime.includes('presentation') || lowerMime.startsWith('text/')) {
+    return 'documents';
+  }
+
+  return 'other';
 }
 
 // Clean chunk/temporary query parameters from video streams (e.g. YouTube videoplayback)
@@ -319,7 +365,7 @@ async function handleInterceptedDownload(downloadItem, suggestCallback) {
     url: downloadUrl,
     fileName: fileName,
     headers: headers,
-    category: getMediaCategory(downloadUrl, downloadItem.mime)
+    category: getMediaCategory(downloadUrl, downloadItem.mime, fileName)
   });
 
   // Fallback to browser download if desktop app is offline or failed so file is never lost!
@@ -389,7 +435,7 @@ async function sendToDesktopApp(payload) {
         url: url,
         fileName: payload.fileName,
         headers: headers,
-        category: payload.category || 'videos'
+        category: payload.category || 'other'
       }),
       signal: controller.signal
     });

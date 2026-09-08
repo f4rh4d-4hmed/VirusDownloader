@@ -149,14 +149,19 @@ class IntegrationServerService extends ChangeNotifier {
           fileName = AppUtils.extractFileName(url);
         }
 
-        // Parse category
-        DownloadCategory category = DownloadCategory.other;
+        // Parse category:
+        // Priority 1: If fileName has a recognizable extension, use its category
+        final extCategory = AppUtils.categoryFromExtension(fileName);
+        DownloadCategory category = extCategory;
+
         final catStr = (data['category'] as String?)?.toLowerCase().trim();
-        if (catStr != null) {
-          if (catStr == 'video' ||
-              catStr == 'videos' ||
-              catStr == 'hls_stream' ||
-              catStr == 'dash_stream') {
+        final isExplicitStream = catStr == 'hls_stream' || catStr == 'dash_stream';
+
+        if (isExplicitStream) {
+          category = DownloadCategory.videos;
+        } else if (category == DownloadCategory.other && catStr != null && catStr.isNotEmpty && catStr != 'other') {
+          // Priority 2: If extension was unknown/other, inspect category provided by browser
+          if (catStr == 'video' || catStr == 'videos') {
             category = DownloadCategory.videos;
           } else if (catStr == 'audio') {
             category = DownloadCategory.audio;
@@ -173,11 +178,9 @@ class IntegrationServerService extends ChangeNotifier {
           } else {
             category = DownloadCategory.values.firstWhere(
               (c) => c.name.toLowerCase() == catStr,
-              orElse: () => AppUtils.categoryFromExtension(fileName),
+              orElse: () => DownloadCategory.other,
             );
           }
-        } else {
-          category = AppUtils.categoryFromExtension(fileName);
         }
 
         // Parse custom headers

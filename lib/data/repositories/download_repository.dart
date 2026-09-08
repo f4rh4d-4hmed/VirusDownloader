@@ -72,6 +72,18 @@ class DownloadRepository extends ChangeNotifier {
 
   Future<void> init() async {
     _tasks = await storageService.loadTasks();
+    bool needsPersist = false;
+    for (int i = 0; i < _tasks.length; i++) {
+      final task = _tasks[i];
+      final extCat = AppUtils.categoryFromExtension(task.fileName);
+      if (extCat != DownloadCategory.other && extCat != task.category) {
+        _tasks[i] = task.copyWith(category: extCat);
+        needsPersist = true;
+      }
+    }
+    if (needsPersist) {
+      _persistTasks();
+    }
     notifyListeners();
   }
 
@@ -103,9 +115,12 @@ class DownloadRepository extends ChangeNotifier {
 
     final uniqueSavePath =
         await fileService.generateUniqueFilePath(targetDirectory, resolvedFileName);
+    final extCategory = AppUtils.categoryFromExtension(resolvedFileName);
     final detectedCategory = isStream
         ? DownloadCategory.videos
-        : (category ?? AppUtils.categoryFromExtension(resolvedFileName));
+        : (extCategory != DownloadCategory.other
+            ? extCategory
+            : (category ?? DownloadCategory.other));
 
     final task = DownloadTask(
       id: _uuid.v4(),
