@@ -17,10 +17,22 @@ import 'http_download_service.dart';
 
 class FfmpegService {
   String? _cachedPath;
+  final Map<String, String> _thumbnailCache = {};
+  final Map<String, Future<String?>> _inProgressThumbnailGenerations = {};
+
+  /// Synchronously returns cached thumbnail path if available in memory
+  String? getCachedThumbnail(String mediaPath) => _thumbnailCache[mediaPath];
+
+  @visibleForTesting
+  void setMockThumbnail(String mediaPath, String thumbnailPath) {
+    _thumbnailCache[mediaPath] = thumbnailPath;
+  }
 
   @visibleForTesting
   void clearCache() {
     _cachedPath = null;
+    _thumbnailCache.clear();
+    _inProgressThumbnailGenerations.clear();
   }
 
   /// Returns 'bundled' if FFmpeg is available via native plugin, or null
@@ -121,11 +133,40 @@ class FfmpegService {
     return ReturnCode.isSuccess(returnCode);
   }
 
-  /// Generates a snapshot thumbnail image from a video file at 1s (or 0s)
-  /// Returns the path to the cached thumbnail JPEG, or null if generation fails.
-  Future<String?> generateVideoThumbnail(String videoPath) async {
+  /// Generates or retrieves a snapshot thumbnail image from a video or audio file.
+  /// Returns the path to the cached thumbnail JPEG, or null if generation fails or no visual stream exists.
+  Future<String?> generateThumbnail(String mediaPath) async {
+    if (_thumbnailCache.containsKey(mediaPath)) {
+      final cached = _thumbnailCache[mediaPath];
+      if (cached != null && File(cached).existsSync()) {
+        return cached;
+      }
+      _thumbnailCache.remove(mediaPath);
+    }
+
+    if (_inProgressThumbnailGenerations.containsKey(mediaPath)) {
+      return await _inProgressThumbnailGenerations[mediaPath];
+    }
+
+    final future = _doGenerateThumbnail(mediaPath);
+    _inProgressThumbnailGenerations[mediaPath] = future;
     try {
-      if (!await File(videoPath).exists()) return null;
+      final result = await future;
+      if (result != null) {
+        _thumbnailCache[mediaPath] = result;
+      }
+      return result;
+    } finally {
+      _inProgressThumbnailGenerations.remove(mediaPath);
+    }
+  }
+
+  /// Backwards-compatible alias for generateThumbnail
+  Future<String?> generateVideoThumbnail(String videoPath) => generateThumbnail(videoPath);
+
+  Future<String?> _doGenerateThumbnail(String mediaPath) async {
+    try {
+      if (!await File(mediaPath).exists()) return null;
 
       final tempDir = await getTemporaryDirectory();
       final thumbsDir = Directory(p.join(tempDir.path, 'vdown_thumbs'));
@@ -133,7 +174,7 @@ class FfmpegService {
         await thumbsDir.create(recursive: true);
       }
 
-      final hash = md5.convert(utf8.encode(videoPath)).toString();
+      final hash = md5.convert(utf8.encode(mediaPath)).toString();
       final thumbPath = p.join(thumbsDir.path, '$hash.jpg');
       final thumbFile = File(thumbPath);
 
@@ -141,12 +182,12 @@ class FfmpegService {
         return thumbPath;
       }
 
-      // First attempt at 1 second
+      // First attempt at 1 second (ideal for videos)
       var session = await FFmpegKit.executeWithArguments([
         '-ss',
         '00:00:01',
         '-i',
-        videoPath,
+        mediaPath,
         '-vframes',
         '1',
         '-q:v',
@@ -157,12 +198,12 @@ class FfmpegService {
       var returnCode = await session.getReturnCode();
 
       if (!ReturnCode.isSuccess(returnCode) || !await thumbFile.exists() || (await thumbFile.length()) == 0) {
-        // Fallback attempt at 0 second
+        // Fallback attempt at 0 second (for short videos or audio embedded cover art)
         session = await FFmpegKit.executeWithArguments([
           '-ss',
           '00:00:00',
           '-i',
-          videoPath,
+          mediaPath,
           '-vframes',
           '1',
           '-q:v',
@@ -177,7 +218,7 @@ class FfmpegService {
         return thumbPath;
       }
     } catch (e) {
-      debugPrint('Error generating video thumbnail: $e');
+      debugPrint('Error generating thumbnail: $e');
     }
     return null;
   }

@@ -15,7 +15,6 @@ import 'add_download_dialog.dart';
 import 'change_download_link_dialog.dart';
 import 'download_tile.dart';
 import 'empty_state.dart';
-import 'file_preview_dialog.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
 import 'settings_page.dart';
@@ -232,20 +231,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openPreviewDialog(BuildContext context, DownloadTask task) {
-    FfmpegService? ffmpeg;
-    try {
-      ffmpeg = context.read<FfmpegService>();
-    } catch (_) {}
-
-    FilePreviewDialog.show(
-      context,
-      task: task,
-      fileService: context.read<FileService>(),
-      ffmpegService: ffmpeg,
-    );
-  }
-
   void _openSelectedFiles(List<DownloadTask> selectedTasks, FileService fileService) {
     final completed = selectedTasks.where((t) => t.status == DownloadStatus.completed).toList();
     if (completed.isEmpty) return;
@@ -443,6 +428,7 @@ class _HomePageState extends State<HomePage> {
     final downloadsVm = context.watch<DownloadsViewModel>();
     final fileService = context.read<FileService>();
     final httpService = context.read<HttpDownloadService>();
+    final ffmpegService = context.read<FfmpegService>();
     final tasks = downloadsVm.tasks;
     _checkCompletedTasks(downloadsVm.allTasks, fileService);
 
@@ -533,6 +519,7 @@ class _HomePageState extends State<HomePage> {
                                   task: task,
                                   fileService: fileService,
                                   httpService: httpService,
+                                  ffmpegService: ffmpegService,
                                   isSelected: _selectedTaskIds.contains(task.id),
                                   onSelect: (isMulti) => _handleTileSelect(task.id, isMulti),
                                   onOpen: () => fileService.openFile(task.savePath),
@@ -628,11 +615,6 @@ class _HomePageState extends State<HomePage> {
     final canHash = selectedTasks.length == 1 &&
         selectedTasks.first.status == DownloadStatus.completed;
 
-    final canPreview = selectedTasks.length == 1 &&
-        selectedTasks.first.status == DownloadStatus.completed &&
-        (AppUtils.canPreview(selectedTasks.first.savePath) ||
-            AppUtils.canPreview(selectedTasks.first.fileName));
-
     if (_showSearch) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -668,14 +650,12 @@ class _HomePageState extends State<HomePage> {
                           onPressed: () {
                             _searchController.clear();
                             vm.setSearchQuery('');
-                            setState(() {});
                           },
                         )
                       : null,
                 ),
                 onChanged: (val) {
                   vm.setSearchQuery(val);
-                  setState(() {});
                 },
               ),
             ),
@@ -704,7 +684,6 @@ class _HomePageState extends State<HomePage> {
         canChangeLink: canChangeLink,
         canRecheck: canRecheck,
         canHash: canHash,
-        canPreview: canPreview,
       );
     }
 
@@ -719,7 +698,6 @@ class _HomePageState extends State<HomePage> {
       canChangeLink: canChangeLink,
       canRecheck: canRecheck,
       canHash: canHash,
-      canPreview: canPreview,
     );
   }
 
@@ -734,7 +712,6 @@ class _HomePageState extends State<HomePage> {
     required bool canChangeLink,
     required bool canRecheck,
     required bool canHash,
-    required bool canPreview,
   }) {
     final theme = Theme.of(context);
     final fileService = context.read<FileService>();
@@ -837,14 +814,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(width: 6),
                 ],
-                if (canPreview) ...[
-                  _buildActionIconButton(
-                    icon: Icons.visibility_outlined,
-                    tooltip: 'Preview',
-                    onPressed: () => _openPreviewDialog(context, selectedTasks.first),
-                  ),
-                  const SizedBox(width: 6),
-                ],
                 if (canOpenFile) ...[
                   _buildActionIconButton(
                     icon: Icons.file_open_outlined,
@@ -928,7 +897,6 @@ class _HomePageState extends State<HomePage> {
     required bool canChangeLink,
     required bool canRecheck,
     required bool canHash,
-    required bool canPreview,
   }) {
     final theme = Theme.of(context);
     final fileService = context.read<FileService>();
@@ -1008,12 +976,6 @@ class _HomePageState extends State<HomePage> {
                     icon: Icons.play_arrow_rounded,
                     tooltip: 'Resume',
                     onPressed: canResume ? () => _resumeSelected(selectedTasks, vm) : null,
-                  ),
-                  const SizedBox(width: 6),
-                  _buildActionIconButton(
-                    icon: Icons.visibility_outlined,
-                    tooltip: 'Preview',
-                    onPressed: canPreview ? () => _openPreviewDialog(context, selectedTasks.first) : null,
                   ),
                   const SizedBox(width: 6),
                   _buildActionIconButton(

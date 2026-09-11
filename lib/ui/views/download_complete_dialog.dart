@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../../core/theme.dart';
 import '../../core/utils.dart';
-import '../../data/services/ffmpeg_service.dart';
 import '../../data/services/file_service.dart';
 import '../../domain/models/download_task.dart';
-import 'file_preview_dialog.dart';
 
 class DownloadCompleteDialog extends StatelessWidget {
   final DownloadTask task;
@@ -129,24 +126,6 @@ class DownloadCompleteDialog extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Dismiss'),
         ),
-        if (AppUtils.canPreview(task.savePath) || AppUtils.canPreview(task.fileName))
-          OutlinedButton.icon(
-            icon: const Icon(Icons.visibility_outlined, size: 18),
-            label: const Text('Preview'),
-            onPressed: () {
-              Navigator.of(context).pop();
-              FfmpegService? ffmpeg;
-              try {
-                ffmpeg = context.read<FfmpegService>();
-              } catch (_) {}
-              FilePreviewDialog.show(
-                context,
-                task: task,
-                fileService: fileService,
-                ffmpegService: ffmpeg,
-              );
-            },
-          ),
         if (AppUtils.isDesktop)
           OutlinedButton.icon(
             icon: const Icon(Icons.folder_open_outlined, size: 18),

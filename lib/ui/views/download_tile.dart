@@ -10,7 +10,6 @@ import '../../data/services/file_service.dart';
 import '../../data/services/http_download_service.dart';
 import '../../domain/models/download_task.dart';
 import 'change_download_link_dialog.dart';
-import 'file_preview_dialog.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
 
@@ -25,6 +24,7 @@ class DownloadTile extends StatefulWidget {
   final void Function(String newUrl, [Map<String, String>? headers, bool restartFromBeginning])? onChangeUrl;
   final FileService fileService;
   final HttpDownloadService? httpService;
+  final FfmpegService? ffmpegService;
   final FocusNode? focusNode;
   final bool isSelected;
   final void Function(bool isMultiSelect)? onSelect;
@@ -42,6 +42,7 @@ class DownloadTile extends StatefulWidget {
     this.onChangeUrl,
     required this.fileService,
     this.httpService,
+    this.ffmpegService,
     this.focusNode,
     this.isSelected = false,
     this.onSelect,
@@ -98,6 +99,13 @@ class _DownloadTileState extends State<DownloadTile> {
   Offset _tapPosition = Offset.zero;
   Route<dynamic>? _activeMenuRoute;
   int _lastTapTime = 0;
+  String? _thumbnailPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnailIfNeeded();
+  }
 
   void _closeMenuIfOpen() {
     final route = _activeMenuRoute;
@@ -111,27 +119,71 @@ class _DownloadTileState extends State<DownloadTile> {
     }
   }
 
-  void _openPreview(BuildContext context) {
-    FfmpegService? ffmpeg;
-    try {
-      ffmpeg = context.read<FfmpegService>();
-    } catch (_) {}
+  void _loadThumbnailIfNeeded() {
+    if (widget.task.status != DownloadStatus.completed) {
+      if (_thumbnailPath != null) {
+        setState(() {
+          _thumbnailPath = null;
+        });
+      }
+      return;
+    }
 
-    FilePreviewDialog.show(
-      context,
-      task: widget.task,
-      fileService: widget.fileService,
-      ffmpegService: ffmpeg,
-    );
+    final savePath = widget.task.savePath;
+    if (savePath.isEmpty) return;
+
+    if (AppUtils.isImageFormat(savePath)) {
+      if (_thumbnailPath != savePath) {
+        setState(() {
+          _thumbnailPath = savePath;
+        });
+      }
+      return;
+    }
+
+    if (AppUtils.isVideoFormat(savePath) || AppUtils.isAudioFormat(savePath)) {
+      final ffmpeg = widget.ffmpegService ?? _getFfmpegService();
+      if (ffmpeg != null) {
+        final cached = ffmpeg.getCachedThumbnail(savePath);
+        if (cached != null) {
+          if (_thumbnailPath != cached) {
+            setState(() {
+              _thumbnailPath = cached;
+            });
+          }
+          return;
+        }
+
+        ffmpeg.generateThumbnail(savePath).then((thumb) {
+          if (mounted && thumb != null && widget.task.savePath == savePath) {
+            setState(() {
+              _thumbnailPath = thumb;
+            });
+          }
+        });
+      }
+    }
+  }
+
+  FfmpegService? _getFfmpegService() {
+    try {
+      return context.read<FfmpegService>();
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
   void didUpdateWidget(DownloadTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.task.status != oldWidget.task.status) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _closeMenuIfOpen();
-      });
+    if (widget.task.status != oldWidget.task.status ||
+        widget.task.savePath != oldWidget.task.savePath) {
+      _loadThumbnailIfNeeded();
+      if (widget.task.status != oldWidget.task.status) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _closeMenuIfOpen();
+        });
+      }
     }
   }
 
@@ -243,17 +295,6 @@ class _DownloadTileState extends State<DownloadTile> {
           ),
         ),
       ] else if (task.status == DownloadStatus.completed) ...[
-        if (AppUtils.canPreview(task.savePath) || AppUtils.canPreview(task.fileName))
-          const PopupMenuItem(
-            value: 'preview',
-            child: Row(
-              children: [
-                Icon(Icons.visibility_outlined, size: 18),
-                SizedBox(width: 10),
-                Expanded(child: Text('Preview')),
-              ],
-            ),
-          ),
         const PopupMenuItem(
           value: 'open_file',
           child: Row(
@@ -410,9 +451,6 @@ class _DownloadTileState extends State<DownloadTile> {
             widget.task.status != DownloadStatus.cancelled) {
           widget.onCancel();
         }
-        break;
-      case 'preview':
-        _openPreview(context);
         break;
       case 'open_file':
         if (widget.task.status == DownloadStatus.completed) {
@@ -586,39 +624,15 @@ class _DownloadTileState extends State<DownloadTile> {
                           child: Stack(
                             alignment: Alignment.bottomRight,
                             children: [
-                              InkWell(
-                                onTap: (widget.task.status == DownloadStatus.completed &&
-                                        (AppUtils.canPreview(widget.task.savePath) ||
-                                            AppUtils.canPreview(widget.task.fileName)))
-                                    ? () => _openPreview(context)
-                                    : null,
-                                borderRadius: BorderRadius.circular(10),
-                                child: Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.surfaceContainerHighest,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  clipBehavior: Clip.antiAlias,
-                                  child: (widget.task.status == DownloadStatus.completed &&
-                                          AppUtils.isImageFormat(widget.task.savePath) &&
-                                          File(widget.task.savePath).existsSync())
-                                      ? Image.file(
-                                          File(widget.task.savePath),
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => Icon(
-                                            categoryIcon,
-                                            size: 22,
-                                            color: theme.colorScheme.onSurfaceVariant,
-                                          ),
-                                        )
-                                      : Icon(
-                                          categoryIcon,
-                                          size: 22,
-                                          color: theme.colorScheme.onSurfaceVariant,
-                                        ),
+                              Container(
+                                width: 44,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
+                                clipBehavior: Clip.antiAlias,
+                                child: _buildLeadingThumbnail(categoryIcon, theme),
                               ),
                               Container(
                                 width: 16,
@@ -854,21 +868,13 @@ class _DownloadTileState extends State<DownloadTile> {
             onPressed: widget.onRetry,
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           )
-        else if (task.status == DownloadStatus.completed) ...[
-          if (AppUtils.canPreview(task.savePath) || AppUtils.canPreview(task.fileName))
-            IconButton(
-              icon: const Icon(Icons.visibility_outlined, size: 20),
-              tooltip: 'Preview',
-              onPressed: () => _openPreview(context),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            ),
+        else if (task.status == DownloadStatus.completed)
           IconButton(
             icon: const Icon(Icons.folder_open_outlined, size: 20),
             tooltip: 'Open Folder',
             onPressed: () => widget.fileService.openContainingFolder(task.savePath),
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           ),
-        ],
 
         // 3-dot Options Menu Button
         PopupMenuButton<String>(
@@ -883,6 +889,32 @@ class _DownloadTileState extends State<DownloadTile> {
           itemBuilder: (context) => _buildMenuItems(context),
         ),
       ],
+    );
+  }
+
+  Widget _buildLeadingThumbnail(IconData categoryIcon, ThemeData theme) {
+    if (widget.task.status == DownloadStatus.completed &&
+        _thumbnailPath != null &&
+        File(_thumbnailPath!).existsSync()) {
+      return Image.file(
+        File(_thumbnailPath!),
+        width: 44,
+        height: 44,
+        fit: BoxFit.cover,
+        cacheWidth: 88,
+        cacheHeight: 88,
+        errorBuilder: (_, __, ___) => Icon(
+          categoryIcon,
+          size: 22,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
+
+    return Icon(
+      categoryIcon,
+      size: 22,
+      color: theme.colorScheme.onSurfaceVariant,
     );
   }
 }
