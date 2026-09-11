@@ -15,7 +15,7 @@ class Shell extends StatelessWidget {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
-      systemNavigationBarColor: theme.colorScheme.surface,
+      systemNavigationBarColor: theme.scaffoldBackgroundColor,
       systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
     );
 

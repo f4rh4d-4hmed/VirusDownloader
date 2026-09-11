@@ -439,6 +439,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final downloadsVm = context.watch<DownloadsViewModel>();
     final fileService = context.read<FileService>();
     final httpService = context.read<HttpDownloadService>();
@@ -468,21 +469,37 @@ class _HomePageState extends State<HomePage> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
-          body: SafeArea(
-            top: true,
-            bottom: false,
-            child: Column(
-              children: [
-                // Top Action Toolbar
-                _buildToolbar(context, downloadsVm),
+          body: Column(
+            children: [
+              // Top Action Header (Edge-to-Edge behind status / notification bar)
+              Material(
+                color: theme.colorScheme.surface,
+                child: SafeArea(
+                  bottom: false,
+                  left: true,
+                  right: true,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Top Action Toolbar
+                      _buildToolbar(context, downloadsVm),
 
-                // Horizontal Filter Chips Bar (FDM Style)
-                _buildFilterChipsBar(context, downloadsVm),
+                      // Horizontal Filter Chips Bar (FDM Style)
+                      _buildFilterChipsBar(context, downloadsVm),
+                    ],
+                  ),
+                ),
+              ),
 
-                const Divider(height: 1),
+              const Divider(height: 1),
 
-                // Main Download List Area
-                Expanded(
+              // Main Download List Area
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  left: true,
+                  right: true,
+                  bottom: AppUtils.isMobile,
                   child: tasks.isEmpty
                       ? EmptyState(
                           onAddDownload: () => _openAddDownloadDialog(context),
@@ -550,14 +567,14 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                 ),
+              ),
 
-                if (AppUtils.isDesktop) ...[
-                  const Divider(height: 1),
-                  // Bottom Status Bar
-                  _buildStatusBar(context, downloadsVm),
-                ],
+              if (AppUtils.isDesktop) ...[
+                const Divider(height: 1),
+                // Bottom Status Bar
+                _buildStatusBar(context, downloadsVm),
               ],
-            ),
+            ],
           ),
         ),
       ),
