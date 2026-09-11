@@ -118,29 +118,56 @@ class SegmentedDownloadService {
   }) async {
     // 1. Probe the remote server to check resumability and total file size
     final probeDio = proxyService.createDioWithProxy(null);
-    final probeHeaders = <String, dynamic>{'range': 'bytes=0-0'};
+    final probeHeaders = <String, dynamic>{};
     if (headers != null) probeHeaders.addAll(headers);
 
     Response probeResp;
     try {
+      // 1. Try HEAD with bytes=0-0
       probeResp = await probeDio.head(
         url,
         options: Options(
-          headers: probeHeaders,
+          headers: {...probeHeaders, 'range': 'bytes=0-0'},
           validateStatus: (s) => s != null && s >= 200 && s < 400,
         ),
         cancelToken: cancelToken,
       );
-    } catch (e) {
-      // If HEAD fails, attempt GET 0-0
-      probeResp = await probeDio.get(
-        url,
-        options: Options(
-          headers: probeHeaders,
-          validateStatus: (s) => s != null && s >= 200 && s < 400,
-        ),
-        cancelToken: cancelToken,
-      );
+    } catch (_) {
+      try {
+        // 2. Try HEAD without range
+        probeResp = await probeDio.head(
+          url,
+          options: Options(
+            headers: probeHeaders,
+            validateStatus: (s) => s != null && s >= 200 && s < 400,
+          ),
+          cancelToken: cancelToken,
+        );
+      } catch (_) {
+        try {
+          // 3. Try stream GET with range
+          probeResp = await probeDio.get<ResponseBody>(
+            url,
+            options: Options(
+              responseType: ResponseType.stream,
+              headers: {...probeHeaders, 'range': 'bytes=0-0'},
+              validateStatus: (s) => s != null && s >= 200 && s < 400,
+            ),
+            cancelToken: cancelToken,
+          );
+        } catch (_) {
+          // 4. Try stream GET without range
+          probeResp = await probeDio.get<ResponseBody>(
+            url,
+            options: Options(
+              responseType: ResponseType.stream,
+              headers: probeHeaders,
+              validateStatus: (s) => s != null && s >= 200 && s < 400,
+            ),
+            cancelToken: cancelToken,
+          );
+        }
+      }
     }
 
     final acceptRanges = probeResp.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase();

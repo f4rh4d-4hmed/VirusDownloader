@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../../core/constants.dart';
+import '../../core/utils.dart';
 
 typedef DownloadProgressCallback = void Function({
   required int downloadedBytes,
@@ -19,10 +21,7 @@ class HttpDownloadService {
               BaseOptions(
                 connectTimeout: const Duration(seconds: 20),
                 receiveTimeout: const Duration(minutes: 60),
-                headers: {
-                  'User-Agent':
-                      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-                },
+                headers: Map<String, dynamic>.from(AppConstants.defaultHttpHeaders),
               ),
             );
 
@@ -158,60 +157,119 @@ class HttpDownloadService {
     }
   }
 
-  /// Probes URL headers to retrieve file name, content length, and resumability without full download
-  Future<({String? fileName, int totalBytes, bool isResumable})> probeUrl(
+  /// Probes URL headers to retrieve file name, content length, and resumability without full download.
+  /// Uses multi-tier fallback: HEAD (0-0) -> HEAD (no range) -> stream GET (0-0) -> stream GET (no range).
+  Future<({String? fileName, int totalBytes, bool isResumable, String? errorMessage})> probeUrl(
     String url, {
     Map<String, String>? headers,
   }) async {
+    final reqHeaders = <String, dynamic>{};
+    if (headers != null) {
+      reqHeaders.addAll(headers);
+    }
+
+    Response? response;
+    dynamic lastError;
+
+    // 1. Try HEAD with range: bytes=0-0
     try {
-      final reqHeaders = <String, dynamic>{
-        'range': 'bytes=0-0',
-      };
-      if (headers != null) {
-        reqHeaders.addAll(headers);
-      }
-      final response = await _dio.head(
+      response = await _dio.head(
         url,
         options: Options(
-          headers: reqHeaders,
+          headers: {...reqHeaders, 'range': 'bytes=0-0'},
           validateStatus: (status) => status != null && status >= 200 && status < 400,
         ),
       );
-
-      int totalBytes = 0;
-      final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
-      final contentLength = response.headers.value(HttpHeaders.contentLengthHeader);
-      final acceptRanges = response.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase();
-
-      if (contentRange != null) {
-        final match = RegExp(r'/(\d+)').firstMatch(contentRange);
-        if (match != null) {
-          totalBytes = int.tryParse(match.group(1) ?? '') ?? 0;
-        }
-      } else if (contentLength != null) {
-        totalBytes = int.tryParse(contentLength) ?? 0;
-      }
-
-      final isResumable = response.statusCode == 206 ||
-          acceptRanges == 'bytes' ||
-          contentRange != null ||
-          (acceptRanges != 'none' && totalBytes > 0);
-
-      String? fileName;
-      final contentDisposition = response.headers.value('content-disposition');
-      if (contentDisposition != null) {
-        final match = RegExp(r'''filename\*?=(?:UTF-8'')?["']?([^;"']+)["']?''')
-            .firstMatch(contentDisposition);
-        if (match != null && match.group(1) != null) {
-          fileName = Uri.decodeComponent(match.group(1)!);
-        }
-      }
-
-      return (fileName: fileName, totalBytes: totalBytes, isResumable: isResumable);
     } catch (e) {
-      debugPrint('Error probing URL headers: $e');
-      return (fileName: null, totalBytes: 0, isResumable: true);
+      lastError = e;
+      // 2. Try HEAD without range (some servers reject range on HEAD)
+      try {
+        response = await _dio.head(
+          url,
+          options: Options(
+            headers: reqHeaders,
+            validateStatus: (status) => status != null && status >= 200 && status < 400,
+          ),
+        );
+      } catch (e2) {
+        lastError = e2;
+        // 3. Try stream GET with range: bytes=0-0 (for servers/CDNs blocking HEAD)
+        try {
+          final streamResp = await _dio.get<ResponseBody>(
+            url,
+            options: Options(
+              responseType: ResponseType.stream,
+              headers: {...reqHeaders, 'range': 'bytes=0-0'},
+              validateStatus: (status) => status != null && status >= 200 && status < 400,
+            ),
+          );
+          response = streamResp;
+        } catch (e3) {
+          lastError = e3;
+          // 4. Try stream GET without range
+          try {
+            final streamResp = await _dio.get<ResponseBody>(
+              url,
+              options: Options(
+                responseType: ResponseType.stream,
+                headers: reqHeaders,
+                validateStatus: (status) => status != null && status >= 200 && status < 400,
+              ),
+            );
+            response = streamResp;
+          } catch (e4) {
+            lastError = e4;
+          }
+        }
+      }
     }
+
+    if (response == null) {
+      final friendlyError = AppUtils.getHumanReadableError(lastError);
+      debugPrint('Error probing URL headers: $friendlyError');
+      return (
+        fileName: null,
+        totalBytes: 0,
+        isResumable: true,
+        errorMessage: friendlyError,
+      );
+    }
+
+    int totalBytes = 0;
+    final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+    final contentLength = response.headers.value(HttpHeaders.contentLengthHeader);
+    final acceptRanges = response.headers.value(HttpHeaders.acceptRangesHeader)?.toLowerCase();
+
+    if (contentRange != null) {
+      final match = RegExp(r'/(\d+)').firstMatch(contentRange);
+      if (match != null) {
+        totalBytes = int.tryParse(match.group(1) ?? '') ?? 0;
+      }
+    } else if (contentLength != null) {
+      totalBytes = int.tryParse(contentLength) ?? 0;
+    }
+
+    final isResumable = response.statusCode == 206 ||
+        acceptRanges == 'bytes' ||
+        contentRange != null ||
+        (acceptRanges != 'none' && totalBytes > 0);
+
+    String? fileName;
+    final contentDisposition = response.headers.value('content-disposition');
+    if (contentDisposition != null) {
+      final match = RegExp(r'''filename\*?=(?:UTF-8'')?["']?([^;"']+)["']?''')
+          .firstMatch(contentDisposition);
+      if (match != null && match.group(1) != null) {
+        fileName = Uri.decodeComponent(match.group(1)!);
+      }
+    }
+
+    return (
+      fileName: fileName,
+      totalBytes: totalBytes,
+      isResumable: isResumable,
+      errorMessage: null,
+    );
   }
 
   /// Verifies whether a new URL points to the same file as an existing partial file

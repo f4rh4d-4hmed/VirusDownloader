@@ -51,6 +51,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
   int _probedSize = 0;
   bool _isResumable = true;
   bool _showAdvanced = false;
+  String? _probeErrorMessage;
 
   @override
   void initState() {
@@ -108,6 +109,9 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     final extracted = AppUtils.extractFileName(url);
     _fileNameController.text = extracted;
     _updateCategory(extracted);
+    setState(() {
+      _probeErrorMessage = null;
+    });
     _probeUrl(url);
   }
 
@@ -145,6 +149,7 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
     if (!url.startsWith('http://') && !url.startsWith('https://')) return;
     setState(() {
       _isProbing = true;
+      _probeErrorMessage = null;
     });
 
     try {
@@ -159,8 +164,15 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
       setState(() {
         _probedSize = info.totalBytes;
         _isResumable = info.isResumable;
+        _probeErrorMessage = info.errorMessage;
       });
-    } catch (_) {} finally {
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _probeErrorMessage = AppUtils.getHumanReadableError(e);
+        });
+      }
+    } finally {
       if (mounted) {
         setState(() {
           _isProbing = false;
@@ -266,6 +278,32 @@ class _AddDownloadDialogState extends State<AddDownloadDialog> {
                     }
                   },
                 ),
+
+                if (_probeErrorMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 16, color: theme.colorScheme.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _probeErrorMessage!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.error,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 16),
 

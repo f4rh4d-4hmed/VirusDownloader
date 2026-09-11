@@ -191,7 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(),
                     // Speed limit mode
                     ListTile(
-                      title: const Text('Speed Limit'),
+                      title: const Text('Speed Mode'),
                       trailing: AppAnimatedDropdown<SpeedLimitMode>(
                         value: settings.speedLimitMode,
                         width: 200,

@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:socks5_proxy/socks_client.dart';
+import '../../core/constants.dart';
+import '../../core/utils.dart';
 import '../../domain/models/proxy_config.dart';
 
 class ProxyBenchmarkResult {
@@ -25,17 +27,20 @@ class ProxyBenchmarkResult {
 class ProxyService {
   /// Create a Dio instance configured with the specified proxy
   Dio createDioWithProxy(ProxyConfig? proxy, {BaseOptions? baseOptions}) {
-    final dio = Dio(
-      baseOptions ??
-          BaseOptions(
-            connectTimeout: const Duration(seconds: 15),
-            receiveTimeout: const Duration(minutes: 60),
-            headers: {
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-            },
-          ),
-    );
+    final options = baseOptions ??
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(minutes: 60),
+        );
+
+    // Ensure default browser headers are always included
+    for (final entry in AppConstants.defaultHttpHeaders.entries) {
+      if (!options.headers.containsKey(entry.key)) {
+        options.headers[entry.key] = entry.value;
+      }
+    }
+
+    final dio = Dio(options);
 
     if (proxy == null || kIsWeb) {
       return dio;
@@ -84,7 +89,7 @@ class ProxyService {
   /// Test connectivity to a proxy server
   Future<ProxyBenchmarkResult> testProxy(
     ProxyConfig proxy, {
-    String testUrl = 'https://www.google.com',
+    String testUrl = 'https://cloudflare.com/cdn-cgi/trace',
     Duration timeout = const Duration(seconds: 5),
   }) async {
     final stopwatch = Stopwatch()..start();
@@ -119,7 +124,7 @@ class ProxyService {
         isWorking: false,
         speedBytesPerSec: 0.0,
         latency: stopwatch.elapsed,
-        errorMessage: e.toString(),
+        errorMessage: AppUtils.getHumanReadableError(e),
       );
     }
   }
@@ -142,16 +147,15 @@ class ProxyService {
     final dio = createDioWithProxy(
       proxy,
       baseOptions: BaseOptions(
-        connectTimeout: const Duration(seconds: 12),
-        receiveTimeout: const Duration(seconds: 30),
+        connectTimeout: const Duration(seconds: 6),
+        receiveTimeout: const Duration(seconds: 15),
       ),
     );
 
-    final stopwatch = Stopwatch();
+    final stopwatch = Stopwatch()..start();
     int receivedBytes = 0;
 
     try {
-      stopwatch.start();
       final response = await dio.get<ResponseBody>(
         downloadUrl,
         options: Options(
@@ -163,20 +167,16 @@ class ProxyService {
       );
 
       final stream = response.data?.stream;
-      if (stream == null) {
-        throw Exception('Empty response stream from proxy');
-      }
+      if (stream == null) throw Exception('No data stream');
 
       await for (final chunk in stream) {
         receivedBytes += chunk.length;
-        if (receivedBytes >= sampleSize || (cancelToken?.isCancelled ?? false)) {
-          break;
-        }
+        if (receivedBytes >= sampleSize) break;
       }
       stopwatch.stop();
 
-      final elapsedSec = stopwatch.elapsedMilliseconds / 1000.0;
-      final speed = elapsedSec > 0 ? (receivedBytes / elapsedSec) : 0.0;
+      final durationSec = stopwatch.elapsedMilliseconds / 1000.0;
+      final speed = durationSec > 0 ? (receivedBytes / durationSec) : 0.0;
 
       return ProxyBenchmarkResult(
         proxy: proxy.copyWith(lastBenchmarkSpeed: speed),
@@ -191,9 +191,8 @@ class ProxyService {
         isWorking: false,
         speedBytesPerSec: 0.0,
         latency: stopwatch.elapsed,
-        errorMessage: e.toString(),
+        errorMessage: AppUtils.getHumanReadableError(e),
       );
     }
   }
 }
-

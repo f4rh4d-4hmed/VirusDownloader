@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'enums.dart';
@@ -279,6 +281,174 @@ class AppUtils {
       case DownloadCategory.other:
         return 'Other';
     }
+  }
+
+  /// Converts raw exceptions or HTTP errors into concise, user-friendly messages
+  static String getHumanReadableError(dynamic error) {
+    if (error == null) return 'Download failed.';
+
+    if (error is DioException) {
+      final statusCode = error.response?.statusCode;
+      final headers = error.response?.headers;
+      final serverHeader = headers?.value('server')?.toLowerCase() ?? '';
+      final cfMitigated = headers?.value('cf-mitigated')?.toLowerCase() ?? '';
+      final respData = error.response?.data?.toString().toLowerCase() ?? '';
+
+      // Check for Cloudflare / anti-bot challenges
+      final isCloudflareChallenge = cfMitigated == 'challenge' ||
+          respData.contains('challenges.cloudflare.com') ||
+          respData.contains('just a moment...') ||
+          (serverHeader.contains('cloudflare') && statusCode == 403);
+
+      if (isCloudflareChallenge) {
+        return 'Cloudflare bot check required. Open link in browser.';
+      }
+
+      if (statusCode != null) {
+        switch (statusCode) {
+          case 400:
+            return 'Bad request (400). Invalid download link.';
+          case 401:
+            return 'Login required (401). Access unauthorized.';
+          case 403:
+            return 'Access denied (403). Link expired or login required.';
+          case 404:
+            return 'File not found on server (404).';
+          case 405:
+            return 'Method not allowed (405). Server rejected request.';
+          case 408:
+            return 'Request timed out (408). Server was slow.';
+          case 410:
+            return 'File permanently removed (410).';
+          case 416:
+            return 'Resume not supported from this position (416).';
+          case 429:
+            return 'Too many requests (429). Rate limit reached.';
+          case 500:
+            return 'Server internal error (500). Try again later.';
+          case 502:
+            return 'Bad gateway (502). Server is unreachable.';
+          case 503:
+            return 'Service temporarily unavailable (503).';
+          case 504:
+            return 'Gateway timed out (504). Server took too long.';
+          default:
+            if (statusCode >= 400 && statusCode < 500) {
+              return 'Client error ($statusCode).';
+            } else if (statusCode >= 500) {
+              return 'Server error ($statusCode).';
+            }
+        }
+      }
+
+      switch (error.type) {
+        case DioExceptionType.connectionTimeout:
+          return 'Connection timed out. Check your internet.';
+        case DioExceptionType.sendTimeout:
+          return 'Send timed out. Request took too long.';
+        case DioExceptionType.receiveTimeout:
+          return 'Server stopped responding (receive timeout).';
+        case DioExceptionType.badCertificate:
+          return 'Security certificate invalid (SSL/TLS error).';
+        case DioExceptionType.cancel:
+          return 'Download was cancelled.';
+        case DioExceptionType.connectionError:
+          return _parseSocketOrNetworkError(error.error ?? error.message);
+        case DioExceptionType.unknown:
+          if (error.error != null) {
+            return _parseSocketOrNetworkError(error.error);
+          }
+          break;
+        default:
+          break;
+      }
+    }
+
+    // Handle FileSystemException (Storage / Permissions)
+    if (error is FileSystemException) {
+      final msg = error.message.toLowerCase();
+      final osMsg = error.osError?.message.toLowerCase() ?? '';
+      if (msg.contains('no space') || osMsg.contains('no space')) {
+        return 'Storage full. Free up device space.';
+      }
+      if (msg.contains('permission') || osMsg.contains('permission')) {
+        return 'Storage permission denied. Choose another folder.';
+      }
+      return 'Storage error: ${error.message}';
+    }
+
+    if (error is SocketException) {
+      return _parseSocketOrNetworkError(error);
+    }
+    if (error is TimeoutException) {
+      return 'Connection timed out.';
+    }
+
+    return _parseSocketOrNetworkError(error.toString());
+  }
+
+  static String _parseSocketOrNetworkError(dynamic raw) {
+    final str = raw.toString().toLowerCase();
+
+    if (str.contains('cf-mitigated') || str.contains('challenges.cloudflare.com')) {
+      return 'Cloudflare bot check required. Open link in browser.';
+    }
+    if (str.contains('403') || str.contains('forbidden')) {
+      return 'Access denied (403). Link expired or login required.';
+    }
+    if (str.contains('404') || str.contains('not found')) {
+      return 'File not found on server (404).';
+    }
+    if (str.contains('401') || str.contains('unauthorized')) {
+      return 'Login required (401). Access unauthorized.';
+    }
+    if (str.contains('429') || str.contains('too many requests')) {
+      return 'Too many requests (429). Rate limit reached.';
+    }
+    if (str.contains('500') || str.contains('internal server error')) {
+      return 'Server internal error (500). Try again later.';
+    }
+    if (str.contains('502') || str.contains('bad gateway')) {
+      return 'Bad gateway (502). Server is unreachable.';
+    }
+    if (str.contains('503') || str.contains('service unavailable')) {
+      return 'Service temporarily unavailable (503).';
+    }
+    if (str.contains('504') || str.contains('gateway timeout')) {
+      return 'Gateway timed out (504). Server took too long.';
+    }
+    if (str.contains('cleartext http traffic') || str.contains('not permitted')) {
+      return 'Cleartext HTTP not allowed. Use HTTPS.';
+    }
+    if (str.contains('failed host lookup') || str.contains('no address associated')) {
+      return 'Cannot reach server. Check internet connection.';
+    }
+    if (str.contains('connection refused')) {
+      return 'Server refused connection. Host may be down.';
+    }
+    if (str.contains('connection reset') || str.contains('broken pipe')) {
+      return 'Connection lost. Server closed connection.';
+    }
+    if (str.contains('network is unreachable')) {
+      return 'No internet connection available.';
+    }
+    if (str.contains('handshake') || str.contains('certificate')) {
+      return 'Security certificate invalid (SSL/TLS error).';
+    }
+    if (str.contains('timed out') || str.contains('timeout')) {
+      return 'Connection timed out. Check your internet.';
+    }
+    if (str.contains('validatestatus was configured to throw')) {
+      return 'Server rejected request. Please check URL.';
+    }
+    if (str.contains('proxy pool exhausted')) {
+      return 'All proxies failed to connect.';
+    }
+    if (str.contains('speed too slow')) {
+      return 'Connection speed too slow.';
+    }
+
+    return 'Download failed. Check connection or link.';
   }
 }
 

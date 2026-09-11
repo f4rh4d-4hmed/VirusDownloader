@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/constants.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../../domain/models/download_task.dart';
@@ -409,7 +410,11 @@ class DownloadRepository extends ChangeNotifier {
     final task = _tasks[index];
 
     final service = integrityService ?? IntegrityService();
-    final dio = Dio();
+    final dio = Dio(
+      BaseOptions(
+        headers: Map<String, dynamic>.from(AppConstants.defaultHttpHeaders),
+      ),
+    );
     return await service.recheckFile(
       url: task.url,
       localFilePath: task.savePath,
@@ -431,7 +436,11 @@ class DownloadRepository extends ChangeNotifier {
     final task = _tasks[index];
 
     final service = integrityService ?? IntegrityService();
-    final dio = Dio();
+    final dio = Dio(
+      BaseOptions(
+        headers: Map<String, dynamic>.from(AppConstants.defaultHttpHeaders),
+      ),
+    );
     return await service.scanAndRepairZeroGaps(
       url: task.url,
       localFilePath: task.savePath,
@@ -667,10 +676,11 @@ class DownloadRepository extends ChangeNotifier {
       } else {
         final errIndex = _tasks.indexWhere((t) => t.id == taskId);
         if (errIndex != -1) {
+          final friendlyError = AppUtils.getHumanReadableError(e);
           _tasks[errIndex] = _tasks[errIndex].copyWith(
             status: DownloadStatus.failed,
             speedBytesPerSec: 0.0,
-            errorMessage: e.message ?? 'Network error occurred',
+            errorMessage: friendlyError,
           );
           _persistTasks();
           notifyListeners();
@@ -678,17 +688,18 @@ class DownloadRepository extends ChangeNotifier {
           notificationService?.showDownloadFailed(
             taskId: taskId,
             fileName: task.fileName,
-            error: e.message ?? 'Network error',
+            error: friendlyError,
           );
         }
       }
     } catch (e) {
       final errIndex = _tasks.indexWhere((t) => t.id == taskId);
       if (errIndex != -1) {
+        final friendlyError = AppUtils.getHumanReadableError(e);
         _tasks[errIndex] = _tasks[errIndex].copyWith(
           status: DownloadStatus.failed,
           speedBytesPerSec: 0.0,
-          errorMessage: e.toString(),
+          errorMessage: friendlyError,
         );
         _persistTasks();
         notifyListeners();
@@ -696,7 +707,7 @@ class DownloadRepository extends ChangeNotifier {
         notificationService?.showDownloadFailed(
           taskId: taskId,
           fileName: task.fileName,
-          error: e.toString(),
+          error: friendlyError,
         );
       }
     } finally {

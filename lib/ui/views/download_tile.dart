@@ -819,7 +819,9 @@ class _DownloadTileState extends State<DownloadTile> {
       case DownloadStatus.completed:
         return 'Completed';
       case DownloadStatus.failed:
-        return task.errorMessage ?? 'Download failed';
+        return task.errorMessage != null
+            ? AppUtils.getHumanReadableError(task.errorMessage)
+            : 'Download failed';
       case DownloadStatus.cancelled:
         return 'Cancelled';
     }
