@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'adaptive_rate_limiter.dart';
 import 'hls_download_service.dart';
 import 'http_download_service.dart';
 
@@ -82,10 +83,12 @@ class FfmpegService {
     void Function(Process process)? onProcessStarted,
     HlsVariantSelector? variantSelector,
     Dio? dio,
+    AdaptiveRateLimiter? rateLimiter,
   }) async {
     final hlsService = HlsDownloadService(
       dio: dio,
       ffmpegService: this,
+      rateLimiter: rateLimiter,
     );
     return await hlsService.downloadHlsStream(
       m3u8Url: m3u8Url,
@@ -95,6 +98,7 @@ class FfmpegService {
       headers: headers,
       cancelToken: cancelToken,
       variantSelector: variantSelector,
+      rateLimiter: rateLimiter,
     );
   }
 

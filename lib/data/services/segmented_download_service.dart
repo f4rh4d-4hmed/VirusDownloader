@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../../domain/models/proxy_config.dart';
+import 'adaptive_rate_limiter.dart';
 import 'file_service.dart';
 import 'http_download_service.dart';
 import 'proxy_service.dart';
@@ -115,7 +116,10 @@ class SegmentedDownloadService {
     Map<String, String>? headers,
     void Function({required bool isResumable})? onResumableChecked,
     void Function(String message)? onStatusMessage,
+    AdaptiveRateLimiter? rateLimiter,
   }) async {
+    final limiter = rateLimiter ?? AdaptiveRateLimiter();
+
     // 1. Probe the remote server to check resumability and total file size
     final probeDio = proxyService.createDioWithProxy(null);
     final probeHeaders = <String, dynamic>{};
@@ -123,6 +127,7 @@ class SegmentedDownloadService {
 
     Response probeResp;
     try {
+      await limiter.acquireToken(cancelToken: cancelToken);
       // 1. Try HEAD with bytes=0-0
       probeResp = await probeDio.head(
         url,
@@ -413,6 +418,8 @@ class SegmentedDownloadService {
           int bytesInSession = 0;
 
           try {
+            await limiter.acquireToken(cancelToken: requestCancelToken);
+
             final resp = await dio.get<ResponseBody>(
               url,
               options: Options(
@@ -422,6 +429,8 @@ class SegmentedDownloadService {
               ),
               cancelToken: requestCancelToken,
             );
+
+            limiter.reportSuccess();
 
             final stream = resp.data?.stream;
             if (stream == null) {
@@ -485,6 +494,12 @@ class SegmentedDownloadService {
             directRetries = 0;
           } catch (e) {
             if (cancelToken.isCancelled) break;
+            if (e is DioException && e.response?.statusCode == 429) {
+              final cooldown = limiter.reportRateLimit(e.response?.headers.map);
+              onStatusMessage?.call(
+                'Worker ${worker.index + 1}: Rate limited (429). Cooldown ${cooldown.inSeconds}s...',
+              );
+            }
             shouldRotateProxy = true;
             failureReason = e is TimeoutException
                 ? 'Proxy stalled (no data for 6s)'
@@ -512,10 +527,10 @@ class SegmentedDownloadService {
           } else if (shouldRotateProxy && currentProxy == null) {
             // Direct connection had an issue
             directRetries++;
-            if (directRetries > 4) {
+            if (directRetries > 6) {
               throw Exception('Direct worker connection failed after multiple retries: $failureReason');
             }
-            await Future.delayed(Duration(milliseconds: 300 * directRetries));
+            await Future.delayed(Duration(milliseconds: 400 * directRetries));
           }
         }
       }());

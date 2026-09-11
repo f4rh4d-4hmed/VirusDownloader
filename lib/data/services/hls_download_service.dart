@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'adaptive_rate_limiter.dart';
 import 'ffmpeg_service.dart';
 import 'http_download_service.dart';
 
@@ -39,10 +40,12 @@ typedef HlsVariantSelector = HlsVariant Function(List<HlsVariant> variants);
 class HlsDownloadService {
   final Dio _dio;
   final FfmpegService _ffmpegService;
+  final AdaptiveRateLimiter _rateLimiter;
 
   HlsDownloadService({
     Dio? dio,
     required FfmpegService ffmpegService,
+    AdaptiveRateLimiter? rateLimiter,
   })  : _dio = dio ??
             Dio(
               BaseOptions(
@@ -50,7 +53,8 @@ class HlsDownloadService {
                 receiveTimeout: const Duration(minutes: 60),
               ),
             ),
-        _ffmpegService = ffmpegService;
+        _ffmpegService = ffmpegService,
+        _rateLimiter = rateLimiter ?? AdaptiveRateLimiter();
 
   /// Default quality selector: picks the variant with the highest bandwidth.
   static HlsVariant selectHighestQuality(List<HlsVariant> variants) {
@@ -161,7 +165,10 @@ class HlsDownloadService {
     int concurrency = 5,
     HlsVariantSelector? variantSelector,
     Directory? tempDirectory,
+    AdaptiveRateLimiter? rateLimiter,
   }) async {
+    final currentLimiter = rateLimiter ?? _rateLimiter;
+
     if (cancelToken?.isCancelled == true) {
       throw DioException(
         requestOptions: RequestOptions(path: m3u8Url),
@@ -300,10 +307,11 @@ class HlsDownloadService {
           final targetFile = segmentFiles[segIdx];
           final partFile = File('${targetFile.path}.part');
 
-          // Download segment with retry (up to 3 attempts)
+          // Download segment with adaptive rate pacing and retry (up to 6 attempts)
           bool success = false;
           Exception? lastEx;
-          for (int attempt = 0; attempt < 3; attempt++) {
+          const maxAttempts = 6;
+          for (int attempt = 0; attempt < maxAttempts; attempt++) {
             if (cancelToken?.isCancelled == true) {
               throw DioException(
                 requestOptions: RequestOptions(path: segUrl),
@@ -311,6 +319,9 @@ class HlsDownloadService {
                 error: 'Download cancelled',
               );
             }
+
+            // Coordinate slot through adaptive rate limiter (handles cooldown & inter-request spacing)
+            await currentLimiter.acquireToken(cancelToken: cancelToken);
 
             try {
               final segResp = await _dio.get<List<int>>(
@@ -332,9 +343,24 @@ class HlsDownloadService {
 
                 totalDownloadedBytes += bytes.length;
                 emitProgress();
+                currentLimiter.reportSuccess();
                 success = true;
                 break;
               }
+            } on DioException catch (e) {
+              if (cancelToken?.isCancelled == true || e.type == DioExceptionType.cancel) {
+                rethrow;
+              }
+              if (e.response?.statusCode == 429) {
+                final cooldown = currentLimiter.reportRateLimit(e.response?.headers.map);
+                debugPrint(
+                  'AdaptiveRateLimiter: 429 Too Many Requests on segment $segIdx. '
+                  'Shared cooldown ${cooldown.inSeconds}s (attempt ${attempt + 1}/$maxAttempts)',
+                );
+              } else {
+                await Future.delayed(Duration(milliseconds: 250 * (attempt + 1)));
+              }
+              lastEx = Exception('Failed to download segment $segIdx ($segUrl): $e');
             } catch (e) {
               lastEx = Exception('Failed to download segment $segIdx ($segUrl): $e');
               if (cancelToken?.isCancelled == true) rethrow;
