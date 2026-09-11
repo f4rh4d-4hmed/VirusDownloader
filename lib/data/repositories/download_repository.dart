@@ -514,6 +514,7 @@ class DownloadRepository extends ChangeNotifier {
         await ffmpegService!.downloadHlsStream(
           m3u8Url: task.url,
           savePath: tempFilePath,
+          taskId: taskId,
           cancelToken: cancelToken,
           headers: task.headers,
           onProgress: ({

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   awesome_notifications
+  ffmpeg_kit_flutter_new_min
   screen_retriever_linux
   url_launcher_linux
   window_manager

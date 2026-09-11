@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:virusdownloader/core/enums.dart';
 import 'package:virusdownloader/data/repositories/download_repository.dart';
@@ -40,41 +39,22 @@ void main() {
   });
 
   group('FfmpegService tests', () {
-    test('Detects local FFmpeg binary in extras directory', () async {
-      final exeName = Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg';
-      final mockDir = Directory(p.join(Directory.current.path, 'extras', 'ffmpeg'));
-      await mockDir.create(recursive: true);
-      final mockExe = File(p.join(mockDir.path, exeName));
-      await mockExe.writeAsString('mock-ffmpeg-binary');
+    test('Bundled FFmpeg is reported as available', () async {
+      final service = FfmpegService();
+      final path = await service.getFfmpegPath();
+      expect(path, equals('bundled'));
+      expect(await service.isAvailable(), isTrue);
 
-      try {
-        final service = FfmpegService();
-        final path = await service.getFfmpegPath();
-        expect(path, isNotNull);
-        expect(await File(path!).exists(), isTrue);
-        expect(await service.isAvailable(), isTrue);
-        expect(p.canonicalize(path), equals(p.canonicalize(mockExe.path)));
-      } finally {
-        if (await mockExe.exists()) {
-          await mockExe.delete();
-        }
-        try {
-          if (await mockDir.exists() && await mockDir.list().isEmpty) {
-            await mockDir.delete();
-          }
-        } catch (_) {}
-      }
+      final dl = await service.downloadLightweightFfmpeg();
+      expect(dl, equals('bundled'));
     });
 
-    test('getFfmpegPath and isAvailable return consistent results', () async {
-      final path = await ffmpegService.getFfmpegPath();
-      final available = await ffmpegService.isAvailable();
-      if (path != null) {
-        expect(await File(path).exists(), isTrue);
-        expect(available, isTrue);
-      } else {
-        expect(available, isFalse);
-      }
+    test('getFfmpegPath supports mock path override for testing', () async {
+      final service = FfmpegService();
+      service.setMockPath('/custom/ffmpeg');
+      expect(await service.getFfmpegPath(), equals('/custom/ffmpeg'));
+      service.clearCache();
+      expect(await service.getFfmpegPath(), equals('bundled'));
     });
 
     test('addTask normalizes .m3u8 URLs to .mkv container with video category', () async {

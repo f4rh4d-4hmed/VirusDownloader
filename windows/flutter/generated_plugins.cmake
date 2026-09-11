@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   awesome_notifications
+  ffmpeg_kit_flutter_new_min
   permission_handler_windows
   screen_retriever_windows
   url_launcher_windows
