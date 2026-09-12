@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,11 +8,16 @@ import 'package:url_launcher/url_launcher.dart';
 class FileService {
   Directory? _customBaseTempDir;
 
+  /// MethodChannel for native Android file operations
+  static const _fileChannel = MethodChannel('com.virusdownloader/file_open');
+
   FileService({Directory? customBaseTempDir}) : _customBaseTempDir = customBaseTempDir;
 
   @visibleForTesting
   void setCustomBaseTempDir(Directory? dir) => _customBaseTempDir = dir;
-  /// Gets the default downloads folder for the current operating system
+
+  /// Gets the default downloads folder for the current operating system.
+  /// On Android, returns the public Downloads/VirusDownloader directory.
   Future<String> getDefaultDownloadDirectory() async {
     try {
       if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
@@ -20,7 +26,51 @@ class FileService {
           return dir.path;
         }
       }
-      // Mobile or fallback
+
+      if (Platform.isAndroid) {
+        // Try to get the public Downloads directory via native channel
+        try {
+          final publicPath = await _fileChannel.invokeMethod<String>('getPublicDownloadPath');
+          if (publicPath != null && publicPath.isNotEmpty) {
+            final dir = Directory(publicPath);
+            if (!await dir.exists()) {
+              await dir.create(recursive: true);
+            }
+            return publicPath;
+          }
+        } catch (_) {}
+
+        // Fallback: try external storage directories
+        final extDirs = await getExternalStorageDirectories();
+        if (extDirs != null && extDirs.isNotEmpty) {
+          // Navigate up from app-specific external to public Downloads
+          // App path is like /storage/emulated/0/Android/data/pkg/files
+          // We want /storage/emulated/0/Download/VirusDownloader
+          final appExtPath = extDirs.first.path;
+          final androidIdx = appExtPath.indexOf('/Android/');
+          if (androidIdx > 0) {
+            final publicDir = Directory(
+              '${appExtPath.substring(0, androidIdx)}/Download/VirusDownloader',
+            );
+            if (!await publicDir.exists()) {
+              try {
+                await publicDir.create(recursive: true);
+              } catch (_) {}
+            }
+            if (await publicDir.exists()) {
+              return publicDir.path;
+            }
+          }
+        }
+
+        // Last resort: external storage directory (app-specific, but visible via USB)
+        final extDir = await getExternalStorageDirectory();
+        if (extDir != null && await extDir.exists()) {
+          return extDir.path;
+        }
+      }
+
+      // iOS or absolute fallback
       final dir = await getApplicationDocumentsDirectory();
       return dir.path;
     } catch (_) {
@@ -90,11 +140,26 @@ class FileService {
     return fullPath;
   }
 
-  /// Opens the file using system default program
+  /// Opens the file using system default program.
+  /// On Android, uses native FileProvider + Intent.ACTION_VIEW via MethodChannel.
   Future<bool> openFile(String filePath) async {
     try {
       final file = File(filePath);
       if (!await file.exists()) return false;
+
+      if (Platform.isAndroid) {
+        // Use native Android intent via MethodChannel
+        try {
+          final result = await _fileChannel.invokeMethod<bool>(
+            'openFile',
+            {'filePath': filePath},
+          );
+          return result ?? false;
+        } catch (e) {
+          debugPrint('Native file open failed, trying url_launcher: $e');
+          // Fall through to url_launcher
+        }
+      }
 
       final uri = Uri.file(filePath);
       if (await canLaunchUrl(uri)) {
@@ -106,7 +171,8 @@ class FileService {
     return false;
   }
 
-  /// Opens containing folder in file manager (Explorer, Finder, Files)
+  /// Opens containing folder in file manager (Explorer, Finder, Files).
+  /// Not supported on Android — caller should check [AppUtils.isDesktop] before calling.
   Future<bool> openContainingFolder(String filePath) async {
     try {
       if (Platform.isWindows) {
@@ -136,17 +202,65 @@ class FileService {
         final parentDir = p.dirname(filePath);
         final result = await Process.run('xdg-open', [parentDir]);
         return result.exitCode == 0;
-      } else {
-        // Mobile fallback
-        final uri = Uri.file(p.dirname(filePath));
-        if (await canLaunchUrl(uri)) {
-          return await launchUrl(uri);
-        }
       }
+      // Android/iOS: not supported, return false
     } catch (e) {
       debugPrint('Error opening containing folder: $e');
     }
     return false;
+  }
+
+  /// Verifies that the given directory is writable by creating and deleting a test file.
+  Future<bool> verifyWriteAccess(String dirPath) async {
+    try {
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final testFile = File(p.join(dirPath, '.vdown_write_test'));
+      await testFile.writeAsString('test');
+      await testFile.delete();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Verifies a downloaded file exists at the expected path.
+  /// Returns the actual path if found, or null if missing.
+  Future<String?> verifySavedFileLocation(String expectedPath) async {
+    if (await File(expectedPath).exists()) {
+      return expectedPath;
+    }
+    return null;
+  }
+
+  /// Renames a file on disk and returns the new full path.
+  /// Returns null if the rename fails.
+  Future<String?> renameFile(String currentPath, String newFileName) async {
+    try {
+      final file = File(currentPath);
+      if (!await file.exists()) return null;
+
+      final parentDir = p.dirname(currentPath);
+      final newPath = await generateUniqueFilePath(parentDir, newFileName);
+      final renamed = await file.rename(newPath);
+      return renamed.path;
+    } catch (e) {
+      debugPrint('Error renaming file: $e');
+      // Try copy+delete as fallback (cross-volume)
+      try {
+        final file = File(currentPath);
+        final parentDir = p.dirname(currentPath);
+        final newPath = await generateUniqueFilePath(parentDir, newFileName);
+        await file.copy(newPath);
+        await file.delete();
+        return newPath;
+      } catch (e2) {
+        debugPrint('Rename fallback also failed: $e2');
+        return null;
+      }
+    }
   }
 
   /// Gets the dedicated temporary directory for in-progress downloads
@@ -244,4 +358,3 @@ class FileService {
     }
   }
 }
-

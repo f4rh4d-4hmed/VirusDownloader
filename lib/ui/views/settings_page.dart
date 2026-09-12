@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
+import '../../data/services/permission_service.dart';
 import '../view_models/settings_view_model.dart';
 import '../widgets/app_animated_dropdown.dart';
 import 'proxy_settings_section.dart';
@@ -263,6 +264,78 @@ class _SettingsPageState extends State<SettingsPage> {
               const ProxySettingsSection(),
 
               const SizedBox(height: 28),
+
+              if (AppUtils.isMobile) ...[
+                // Background & Permissions Section (Android)
+                Text(
+                  'Background Behavior & Permissions',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: Column(
+                    children: [
+                      SwitchListTile(
+                        secondary: const Icon(Icons.downloading_rounded),
+                        title: const Text('Keep running when closed'),
+                        subtitle: const Text(
+                          'Runs as a foreground service so active downloads continue uninterrupted',
+                        ),
+                        value: settings.runInBackground,
+                        onChanged: (val) => settingsVm.updateRunInBackground(val),
+                      ),
+                      const Divider(height: 1),
+                      SwitchListTile(
+                        secondary: const Icon(Icons.power_settings_new_rounded),
+                        title: const Text('Auto-start on device boot'),
+                        subtitle: const Text(
+                          'Automatically starts the background service when device boots',
+                        ),
+                        value: settings.autoStartOnBoot,
+                        onChanged: (val) => settingsVm.updateAutoStartOnBoot(val),
+                      ),
+                      const Divider(height: 1),
+                      FutureBuilder<bool>(
+                        future: context.read<PermissionService>().isBatteryOptimizationExempt(),
+                        builder: (ctx, snapshot) {
+                          final isExempt = snapshot.data ?? false;
+                          return ListTile(
+                            leading: Icon(
+                              isExempt ? Icons.battery_charging_full_rounded : Icons.battery_alert_rounded,
+                              color: isExempt ? Colors.green : Colors.amber,
+                            ),
+                            title: const Text('Battery Optimization'),
+                            subtitle: Text(
+                              isExempt
+                                  ? 'Exempted (Background downloads unrestricted)'
+                                  : 'Restricted by Android. Tap to exempt for reliable background downloads.',
+                            ),
+                            trailing: isExempt
+                                ? const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20)
+                                : TextButton(
+                                    onPressed: () async {
+                                      await context.read<PermissionService>().requestBatteryOptimizationExemption();
+                                      setState(() {});
+                                    },
+                                    child: const Text('Exempt'),
+                                  ),
+                            onTap: isExempt
+                                ? null
+                                : () async {
+                                    await context.read<PermissionService>().requestBatteryOptimizationExemption();
+                                    setState(() {});
+                                  },
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+              ],
 
               if (!AppUtils.isMobile) ...[
                 // Browser Extension Section

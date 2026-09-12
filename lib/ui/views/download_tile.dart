@@ -12,6 +12,7 @@ import '../../domain/models/download_task.dart';
 import 'change_download_link_dialog.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
+import 'rename_dialog.dart';
 
 class DownloadTile extends StatefulWidget {
   final DownloadTask task;
@@ -22,12 +23,15 @@ class DownloadTile extends StatefulWidget {
   final VoidCallback onRemove;
   final VoidCallback onDeleteFile;
   final void Function(String newUrl, [Map<String, String>? headers, bool restartFromBeginning])? onChangeUrl;
+  final void Function(String newName)? onRename;
   final FileService fileService;
   final HttpDownloadService? httpService;
   final FfmpegService? ffmpegService;
   final FocusNode? focusNode;
   final bool isSelected;
+  final bool isSelectionMode;
   final void Function(bool isMultiSelect)? onSelect;
+  final VoidCallback? onLongPressSelect;
   final VoidCallback? onOpen;
 
   const DownloadTile({
@@ -40,12 +44,15 @@ class DownloadTile extends StatefulWidget {
     required this.onRemove,
     required this.onDeleteFile,
     this.onChangeUrl,
+    this.onRename,
     required this.fileService,
     this.httpService,
     this.ffmpegService,
     this.focusNode,
     this.isSelected = false,
+    this.isSelectionMode = false,
     this.onSelect,
+    this.onLongPressSelect,
     this.onOpen,
   });
 
@@ -305,16 +312,17 @@ class _DownloadTileState extends State<DownloadTile> {
             ],
           ),
         ),
-        const PopupMenuItem(
-          value: 'open_folder',
-          child: Row(
-            children: [
-              Icon(Icons.folder_open_outlined, size: 18),
-              SizedBox(width: 10),
-              Expanded(child: Text('Show in Folder')),
-            ],
+        if (AppUtils.isDesktop)
+          const PopupMenuItem(
+            value: 'open_folder',
+            child: Row(
+              children: [
+                Icon(Icons.folder_open_outlined, size: 18),
+                SizedBox(width: 10),
+                Expanded(child: Text('Show in Folder')),
+              ],
+            ),
           ),
-        ),
         if (task.isResumable)
           const PopupMenuItem(
             value: 'recheck',
@@ -337,6 +345,16 @@ class _DownloadTileState extends State<DownloadTile> {
           ),
         ),
       ],
+      const PopupMenuItem(
+        value: 'rename',
+        child: Row(
+          children: [
+            Icon(Icons.edit_outlined, size: 18),
+            SizedBox(width: 10),
+            Expanded(child: Text('Rename')),
+          ],
+        ),
+      ),
       const PopupMenuItem(
         value: 'copy_url',
         child: Row(
@@ -496,6 +514,15 @@ class _DownloadTileState extends State<DownloadTile> {
       case 'delete_disk':
         widget.onDeleteFile();
         break;
+      case 'rename':
+        RenameDialog.show(
+          context,
+          widget.task.fileName,
+          onConfirm: (newName) {
+            widget.onRename?.call(newName);
+          },
+        );
+        break;
     }
   }
 
@@ -591,7 +618,10 @@ class _DownloadTileState extends State<DownloadTile> {
                           HardwareKeyboard.instance.isMetaPressed;
                       widget.onSelect?.call(isMulti);
                     } else {
-                      if (widget.task.status == DownloadStatus.completed) {
+                      // Mobile: if in selection mode, toggle selection
+                      if (widget.isSelectionMode) {
+                        widget.onSelect?.call(true);
+                      } else if (widget.task.status == DownloadStatus.completed) {
                         widget.fileService.openFile(widget.task.savePath);
                       } else {
                         widget.onSelect?.call(false);
@@ -612,7 +642,12 @@ class _DownloadTileState extends State<DownloadTile> {
                     _showOptionsMenu(context, details.globalPosition);
                   },
                   onLongPress: () {
-                    _showOptionsMenu(context, _tapPosition);
+                    if (AppUtils.isMobile) {
+                      // Mobile: long-press enters selection mode
+                      widget.onLongPressSelect?.call();
+                    } else {
+                      _showOptionsMenu(context, _tapPosition);
+                    }
                   },
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
@@ -634,6 +669,30 @@ class _DownloadTileState extends State<DownloadTile> {
                                 clipBehavior: Clip.antiAlias,
                                 child: _buildLeadingThumbnail(categoryIcon, theme),
                               ),
+                              if (widget.task.fileMissing)
+                                Positioned(
+                                  top: -2,
+                                  right: -2,
+                                  child: Container(
+                                    width: 18,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.error,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: theme.scaffoldBackgroundColor,
+                                        width: 2,
+                                      ),
+                                    ),
+                                    child: const Center(
+                                      child: Icon(
+                                        Icons.warning_rounded,
+                                        size: 10,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               Container(
                                 width: 16,
                                 height: 16,
@@ -831,6 +890,9 @@ class _DownloadTileState extends State<DownloadTile> {
       case DownloadStatus.queued:
         return 'Queued';
       case DownloadStatus.completed:
+        if (task.fileMissing) {
+          return 'File missing from disk';
+        }
         return 'Completed';
       case DownloadStatus.failed:
         return task.errorMessage != null
@@ -869,12 +931,19 @@ class _DownloadTileState extends State<DownloadTile> {
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           )
         else if (task.status == DownloadStatus.completed)
-          IconButton(
-            icon: const Icon(Icons.folder_open_outlined, size: 20),
-            tooltip: 'Open Folder',
-            onPressed: () => widget.fileService.openContainingFolder(task.savePath),
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-          ),
+          AppUtils.isMobile
+              ? IconButton(
+                  icon: const Icon(Icons.file_open_outlined, size: 20),
+                  tooltip: 'Open File',
+                  onPressed: () => widget.fileService.openFile(task.savePath),
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.folder_open_outlined, size: 20),
+                  tooltip: 'Open Folder',
+                  onPressed: () => widget.fileService.openContainingFolder(task.savePath),
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                ),
 
         // 3-dot Options Menu Button
         PopupMenuButton<String>(

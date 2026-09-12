@@ -18,6 +18,7 @@ class DownloadTask {
   final bool isResumable;
   final String? fileHash;
   final HashAlgorithm? hashAlgorithm;
+  final bool fileMissing;
 
   const DownloadTask({
     required this.id,
@@ -36,6 +37,7 @@ class DownloadTask {
     this.isResumable = true,
     this.fileHash,
     this.hashAlgorithm,
+    this.fileMissing = false,
   });
 
   double get progress {
@@ -81,6 +83,7 @@ class DownloadTask {
     bool? isResumable,
     String? fileHash,
     HashAlgorithm? hashAlgorithm,
+    bool? fileMissing,
   }) {
     return DownloadTask(
       id: id ?? this.id,
@@ -99,6 +102,7 @@ class DownloadTask {
       isResumable: isResumable ?? this.isResumable,
       fileHash: fileHash ?? this.fileHash,
       hashAlgorithm: hashAlgorithm ?? this.hashAlgorithm,
+      fileMissing: fileMissing ?? this.fileMissing,
     );
   }
 }

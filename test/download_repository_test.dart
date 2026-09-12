@@ -270,6 +270,98 @@ void main() {
       expect(await File(dst).exists(), isTrue);
       expect(await File(dst).readAsString(), 'fresh content');
     });
+
+    test('generateUniqueFilePath resolves duplicates with (1), (2) suffixes', () async {
+      final actualService = FileService(customBaseTempDir: tempTestDir);
+      final file1 = '${tempTestDir.path}/example.mkv';
+      await File(file1).writeAsString('first');
+
+      final path2 = await actualService.generateUniqueFilePath(tempTestDir.path, 'example.mkv');
+      expect(path2.endsWith('example (1).mkv'), isTrue);
+    });
+  });
+
+  group('DownloadRepository New Features & Bug Fixes', () {
+    test('addTask assigns unique basename to fileName when file already exists (Bug D1)', () async {
+      // Create existing file in download folder
+      final existingFile = File('${tempTestDir.path}/example.mkv');
+      await existingFile.writeAsString('existing content');
+
+      await downloadRepo.init();
+
+      // Add a download with the same name
+      final task = await downloadRepo.addTask(
+        url: 'http://example.com/example.mkv',
+        targetDirectory: tempTestDir.path,
+        fileName: 'example.mkv',
+      );
+      await downloadRepo.cancelDownload(task.id);
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      expect(task.fileName, 'example (1).mkv');
+      expect(task.savePath.endsWith('example (1).mkv'), isTrue);
+    });
+
+    test('renameTask renames completed file on disk and updates task model (Feature F3)', () async {
+      await downloadRepo.init();
+
+      final completedPath = '${tempTestDir.path}/initial_name.txt';
+      await File(completedPath).writeAsString('file content');
+
+      final task = DownloadTask(
+        id: 'rename-test-1',
+        url: 'http://example.com/initial_name.txt',
+        fileName: 'initial_name.txt',
+        savePath: completedPath,
+        status: DownloadStatus.completed,
+        dateAdded: DateTime.now(),
+      );
+
+      await storageService.saveTasks([task]);
+      await downloadRepo.init();
+
+      await downloadRepo.renameTask('rename-test-1', 'new_name.txt');
+
+      final updatedTask = downloadRepo.tasks.firstWhere((t) => t.id == 'rename-test-1');
+      expect(updatedTask.fileName, 'new_name.txt');
+      expect(await File('${tempTestDir.path}/new_name.txt').exists(), isTrue);
+      expect(await File(completedPath).exists(), isFalse);
+    });
+
+    test('Periodic file checker detects missing completed file (Feature F4)', () async {
+      await downloadRepo.init();
+
+      final existingPath = '${tempTestDir.path}/will_be_deleted.txt';
+      final file = File(existingPath);
+      await file.writeAsString('to be deleted');
+
+      final task = DownloadTask(
+        id: 'missing-test-1',
+        url: 'http://example.com/will_be_deleted.txt',
+        fileName: 'will_be_deleted.txt',
+        savePath: existingPath,
+        status: DownloadStatus.completed,
+        dateAdded: DateTime.now(),
+        fileMissing: false,
+      );
+
+      await storageService.saveTasks([task]);
+      await downloadRepo.init();
+
+      expect(downloadRepo.tasks.firstWhere((t) => t.id == 'missing-test-1').fileMissing, isFalse);
+
+      // Now delete file from disk
+      await file.delete();
+
+      // Trigger periodic check
+      downloadRepo.startPeriodicFileCheck(interval: const Duration(seconds: 1));
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      final checkedTask = downloadRepo.tasks.firstWhere((t) => t.id == 'missing-test-1');
+      expect(checkedTask.fileMissing, isTrue);
+
+      downloadRepo.stopPeriodicFileCheck();
+    });
   });
 }
 

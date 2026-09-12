@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/enums.dart';
 import '../../core/utils.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../../data/services/background_service.dart';
 import '../../data/services/browser_integration_service.dart';
 import '../../data/services/integration_server_service.dart';
 import '../../data/services/proxy_service.dart';
@@ -33,6 +34,7 @@ class SettingsViewModel extends ChangeNotifier {
   final BrowserIntegrationService browserService;
   final IntegrationServerService integrationServer;
   final ProxyService? proxyService;
+  final BackgroundService? backgroundService;
 
   List<DetectedBrowser> _detectedBrowsers = [];
   bool _isDetectingBrowsers = false;
@@ -43,6 +45,7 @@ class SettingsViewModel extends ChangeNotifier {
     required this.browserService,
     required this.integrationServer,
     this.proxyService,
+    this.backgroundService,
   }) {
     integrationServer.addListener(_onServerStateChanged);
     initBrowserIntegration();
@@ -141,6 +144,23 @@ class SettingsViewModel extends ChangeNotifier {
 
   Future<void> updateAutoRecheck(bool enabled) async {
     final updated = settings.copyWith(autoRecheckOnComplete: enabled);
+    await repository.updateSettings(updated);
+    notifyListeners();
+  }
+
+  Future<void> updateRunInBackground(bool enabled) async {
+    final updated = settings.copyWith(runInBackground: enabled);
+    await repository.updateSettings(updated);
+    if (enabled) {
+      await backgroundService?.startBackgroundService();
+    } else {
+      await backgroundService?.stopBackgroundService();
+    }
+    notifyListeners();
+  }
+
+  Future<void> updateAutoStartOnBoot(bool enabled) async {
+    final updated = settings.copyWith(autoStartOnBoot: enabled);
     await repository.updateSettings(updated);
     notifyListeners();
   }

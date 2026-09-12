@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Public Downloads directory -->
+    <external-path name="external_downloads" path="Download" />
+    <!-- External storage root (for user-configured custom paths) -->
+    <external-path name="external_root" path="." />
+    <!-- App-specific external files directory -->
+    <external-files-path name="external_files" path="." />
+    <!-- App-internal cache (temp files during download) -->
+    <cache-path name="cache" path="." />
+    <!-- App-internal files directory (fallback) -->
+    <files-path name="files" path="." />
+</paths>

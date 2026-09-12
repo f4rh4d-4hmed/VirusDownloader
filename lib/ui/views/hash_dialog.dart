@@ -25,7 +25,7 @@ class HashDialog extends StatefulWidget {
 }
 
 class _HashDialogState extends State<HashDialog> {
-  HashAlgorithm _selectedAlgorithm = HashAlgorithm.sha256;
+  HashAlgorithm? _selectedAlgorithm;
   final TextEditingController _compareController = TextEditingController();
   String? _calculatedHash;
   bool _isCalculating = false;
@@ -35,8 +35,6 @@ class _HashDialogState extends State<HashDialog> {
   @override
   void initState() {
     super.initState();
-    // Auto-calculate with initial algorithm
-    _startCalculation(_selectedAlgorithm);
   }
 
   @override
@@ -123,6 +121,7 @@ class _HashDialogState extends State<HashDialog> {
                   const SizedBox(width: 12),
                   AppAnimatedDropdown<HashAlgorithm>(
                     value: _selectedAlgorithm,
+                    placeholderLabel: 'Tap',
                     menuWidth: 140,
                     items: HashAlgorithm.values.map((algo) {
                       return AppDropdownItem<HashAlgorithm>(
@@ -134,7 +133,7 @@ class _HashDialogState extends State<HashDialog> {
                     onChanged: _isCalculating
                         ? null
                         : (val) {
-                            if (val != null) {
+                            if (val != null && val != _selectedAlgorithm) {
                               _startCalculation(val);
                             }
                           },
@@ -196,6 +195,23 @@ class _HashDialogState extends State<HashDialog> {
                         },
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ] else if (_selectedAlgorithm == null && !_isCalculating) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 12),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
+                  ),
+                  child: Text(
+                    'Select an algorithm to calculate hash',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -284,7 +300,7 @@ class _HashDialogState extends State<HashDialog> {
           child: const Text('Close'),
         ),
         FilledButton.tonal(
-          onPressed: _isCalculating ? null : () => _startCalculation(_selectedAlgorithm),
+          onPressed: _isCalculating || _selectedAlgorithm == null ? null : () => _startCalculation(_selectedAlgorithm!),
           child: const Text('Recalculate'),
         ),
       ],

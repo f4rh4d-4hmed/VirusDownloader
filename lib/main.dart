@@ -9,6 +9,7 @@ import 'core/constants.dart';
 import 'core/utils.dart';
 import 'data/repositories/download_repository.dart';
 import 'data/repositories/settings_repository.dart';
+import 'data/services/background_service.dart';
 import 'data/services/browser_integration_service.dart';
 import 'data/services/ffmpeg_service.dart';
 import 'data/services/file_service.dart';
@@ -47,7 +48,7 @@ void main() async {
 
   // Initialize Core Services & Startup Permissions
   final permissionService = PermissionService();
-  await permissionService.requestNotificationPermission();
+  await permissionService.checkAndRequestAllPermissions();
 
   final notificationService = NotificationService();
   await notificationService.init();
@@ -66,8 +67,14 @@ void main() async {
     fileService: fileService,
   );
 
+  final backgroundService = BackgroundService();
+
   final settingsRepository = SettingsRepository(storageService: storageService);
   await settingsRepository.init();
+
+  if (settingsRepository.currentSettings.runInBackground) {
+    await backgroundService.startBackgroundService();
+  }
 
   final downloadRepository = DownloadRepository(
     httpService: httpService,
@@ -104,6 +111,7 @@ void main() async {
         Provider<ProxyService>.value(value: proxyService),
         Provider<IntegrityService>.value(value: integrityService),
         Provider<SegmentedDownloadService>.value(value: segmentedService),
+        Provider<BackgroundService>.value(value: backgroundService),
         Provider<BrowserIntegrationService>.value(value: browserIntegrationService),
         ChangeNotifierProvider<IntegrationServerService>.value(value: integrationServer),
 
@@ -121,6 +129,7 @@ void main() async {
             browserService: browserIntegrationService,
             integrationServer: integrationServer,
             proxyService: proxyService,
+            backgroundService: backgroundService,
           ),
         ),
       ],

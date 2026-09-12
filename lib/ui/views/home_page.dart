@@ -17,6 +17,7 @@ import 'download_tile.dart';
 import 'empty_state.dart';
 import 'hash_dialog.dart';
 import 'recheck_dialog.dart';
+import 'rename_dialog.dart';
 import 'settings_page.dart';
 import '../widgets/app_animated_dropdown.dart';
 import '../widgets/speed_limit_icon.dart';
@@ -229,6 +230,18 @@ class _HomePageState extends State<HomePage> {
     for (final path in paths) {
       fileService.openContainingFolder(path);
     }
+  }
+
+  void _renameSelected(List<DownloadTask> selectedTasks, DownloadsViewModel vm) {
+    if (selectedTasks.isEmpty) return;
+    final task = selectedTasks.first;
+    RenameDialog.show(
+      context,
+      task.fileName,
+      onConfirm: (newName) {
+        vm.rename(task.id, newName);
+      },
+    );
   }
 
   void _openSelectedFiles(List<DownloadTask> selectedTasks, FileService fileService) {
@@ -455,6 +468,9 @@ class _HomePageState extends State<HomePage> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          bottomNavigationBar: AppUtils.isMobile && _selectedTaskIds.isNotEmpty
+              ? _buildMobileSelectionBar(context, downloadsVm)
+              : null,
           body: Column(
             children: [
               // Top Action Header (Edge-to-Edge behind status / notification bar)
@@ -485,7 +501,7 @@ class _HomePageState extends State<HomePage> {
                   top: false,
                   left: true,
                   right: true,
-                  bottom: AppUtils.isMobile,
+                  bottom: AppUtils.isMobile && _selectedTaskIds.isEmpty,
                   child: tasks.isEmpty
                       ? EmptyState(
                           onAddDownload: () => _openAddDownloadDialog(context),
@@ -521,7 +537,10 @@ class _HomePageState extends State<HomePage> {
                                   httpService: httpService,
                                   ffmpegService: ffmpegService,
                                   isSelected: _selectedTaskIds.contains(task.id),
+                                  isSelectionMode: _selectedTaskIds.isNotEmpty,
                                   onSelect: (isMulti) => _handleTileSelect(task.id, isMulti),
+                                  onLongPressSelect: () => _handleTileSelect(task.id, true),
+                                  onRename: (newName) => downloadsVm.rename(task.id, newName),
                                   onOpen: () => fileService.openFile(task.savePath),
                                   onPause: () => downloadsVm.pause(task.id),
                                   onResume: () => downloadsVm.resume(task.id),
@@ -672,19 +691,10 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
+    final canRename = selectedTasks.length == 1;
+
     if (AppUtils.isMobile) {
-      return _buildMobileToolbar(
-        context,
-        vm,
-        selectedTasks,
-        canPause: canPause,
-        canResume: canResume,
-        canRetry: canRetry,
-        canOpenFile: canOpenFile,
-        canChangeLink: canChangeLink,
-        canRecheck: canRecheck,
-        canHash: canHash,
-      );
+      return _buildMobileToolbar(context, vm);
     }
 
     return _buildDesktopToolbar(
@@ -695,6 +705,7 @@ class _HomePageState extends State<HomePage> {
       canResume: canResume,
       canRetry: canRetry,
       canOpenFile: canOpenFile,
+      canRename: canRename,
       canChangeLink: canChangeLink,
       canRecheck: canRecheck,
       canHash: canHash,
@@ -704,185 +715,238 @@ class _HomePageState extends State<HomePage> {
   Widget _buildMobileToolbar(
     BuildContext context,
     DownloadsViewModel vm,
-    List<DownloadTask> selectedTasks, {
-    required bool canPause,
-    required bool canResume,
-    required bool canRetry,
-    required bool canOpenFile,
-    required bool canChangeLink,
-    required bool canRecheck,
-    required bool canHash,
-  }) {
+  ) {
     final theme = Theme.of(context);
-    final fileService = context.read<FileService>();
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
-          color: theme.colorScheme.surface,
-          child: Row(
-            children: [
-              // Swapped for one-handed use: Left has Settings, Sort, Search
-              IconButton(
-                icon: const Icon(Icons.settings_outlined, size: 20),
-                tooltip: 'Settings',
-                onPressed: () => _openSettings(context),
-              ),
-              const SizedBox(width: 4),
-              _buildSortButton(vm),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.search_rounded, size: 20),
-                tooltip: 'Search',
-                onPressed: () => setState(() => _showSearch = true),
-              ),
-
-              const Spacer(),
-
-              // Right side: Under the thumb for 1-handed use:
-              // Pause All Button
-              IconButton.outlined(
-                onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
-                icon: const Icon(Icons.pause_rounded, size: 18),
-                tooltip: 'Pause All',
-                style: IconButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  minimumSize: const Size(36, 36),
-                  fixedSize: const Size(36, 36),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Resume All Button
-              IconButton.outlined(
-                onPressed: () => vm.resumeAll(),
-                icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                tooltip: 'Resume All',
-                style: IconButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  minimumSize: const Size(36, 36),
-                  fixedSize: const Size(36, 36),
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // Add URL Button (Filled, prominent)
-              IconButton.filled(
-                onPressed: () => _openAddDownloadDialog(context),
-                icon: const Icon(Icons.add_rounded, size: 20),
-                tooltip: 'Add URL',
-                style: IconButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  minimumSize: const Size(36, 36),
-                  fixedSize: const Size(36, 36),
-                ),
-              ),
-            ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+      color: theme.colorScheme.surface,
+      child: Row(
+        children: [
+          // Swapped for one-handed use: Left has Settings, Sort, Search
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, size: 20),
+            tooltip: 'Settings',
+            onPressed: () => _openSettings(context),
           ),
-        ),
+          const SizedBox(width: 4),
+          _buildSortButton(vm),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.search_rounded, size: 20),
+            tooltip: 'Search',
+            onPressed: () => setState(() => _showSearch = true),
+          ),
 
-        // Contextual action bar on mobile when items are selected
-        if (selectedTasks.isNotEmpty) ...[
-          Container(
-            height: 48,
-            color: theme.colorScheme.surfaceContainerLow,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-              children: [
-                _buildActionIconButton(
-                  icon: Icons.folder_open_outlined,
-                  tooltip: 'Folder',
-                  onPressed: () => _openSelectedFolder(selectedTasks, fileService),
-                ),
-                const SizedBox(width: 6),
-                if (canPause) ...[
-                  _buildActionIconButton(
-                    icon: Icons.pause_rounded,
-                    tooltip: 'Pause',
-                    onPressed: () => _pauseSelected(selectedTasks, vm),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canResume) ...[
-                  _buildActionIconButton(
-                    icon: Icons.play_arrow_rounded,
-                    tooltip: 'Resume',
-                    onPressed: () => _resumeSelected(selectedTasks, vm),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canOpenFile) ...[
-                  _buildActionIconButton(
-                    icon: Icons.file_open_outlined,
-                    tooltip: 'Open',
-                    onPressed: () => _openSelectedFiles(selectedTasks, fileService),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canRetry) ...[
-                  _buildActionIconButton(
-                    icon: Icons.replay_rounded,
-                    tooltip: 'Restart',
-                    onPressed: () => _retrySelected(selectedTasks, vm),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canRecheck) ...[
-                  _buildActionIconButton(
-                    icon: Icons.verified_outlined,
-                    tooltip: 'Recheck',
-                    onPressed: () => _recheckSelected(selectedTasks),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canHash) ...[
-                  _buildActionIconButton(
-                    icon: Icons.fingerprint_rounded,
-                    tooltip: 'Hash',
-                    onPressed: () => _hashSelected(selectedTasks),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                if (canChangeLink) ...[
-                  _buildActionIconButton(
-                    icon: Icons.link_rounded,
-                    tooltip: 'Change Link',
-                    onPressed: () => _openChangeUrlDialog(context, selectedTasks.first, vm),
-                  ),
-                  const SizedBox(width: 6),
-                ],
-                _buildActionIconButton(
-                  icon: Icons.copy_rounded,
-                  tooltip: 'Copy Link',
-                  onPressed: () => _copySelectedUrls(selectedTasks),
-                ),
-                const SizedBox(width: 6),
-                _buildActionIconButton(
-                  icon: Icons.delete_outline_rounded,
-                  tooltip: 'Remove',
-                  onPressed: () => _removeSelectedFromList(selectedTasks, vm),
-                ),
-                const SizedBox(width: 6),
-                _buildActionIconButton(
-                  icon: Icons.delete_forever_rounded,
-                  tooltip: 'Delete',
-                  color: theme.colorScheme.error,
-                  onPressed: () => _deleteSelectedFromDisk(context, selectedTasks),
-                ),
-                const SizedBox(width: 6),
-                _buildActionIconButton(
-                  icon: Icons.close_rounded,
-                  tooltip: 'Clear',
-                  onPressed: () => setState(() => _selectedTaskIds.clear()),
-                ),
-              ],
+          const Spacer(),
+
+          // Right side: Under the thumb for 1-handed use:
+          // Pause All Button
+          IconButton.outlined(
+            onPressed: vm.downloadingCount > 0 ? () => vm.pauseAll() : null,
+            icon: const Icon(Icons.pause_rounded, size: 18),
+            tooltip: 'Pause All',
+            style: IconButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              minimumSize: const Size(36, 36),
+              fixedSize: const Size(36, 36),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Resume All Button
+          IconButton.outlined(
+            onPressed: () => vm.resumeAll(),
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            tooltip: 'Resume All',
+            style: IconButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              minimumSize: const Size(36, 36),
+              fixedSize: const Size(36, 36),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Add URL Button (Filled, prominent)
+          IconButton.filled(
+            onPressed: () => _openAddDownloadDialog(context),
+            icon: const Icon(Icons.add_rounded, size: 20),
+            tooltip: 'Add URL',
+            style: IconButton.styleFrom(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              minimumSize: const Size(36, 36),
+              fixedSize: const Size(36, 36),
             ),
           ),
         ],
-      ],
+      ),
+    );
+  }
+
+  Widget _buildMobileSelectionBar(
+    BuildContext context,
+    DownloadsViewModel vm,
+  ) {
+    final theme = Theme.of(context);
+    final fileService = context.read<FileService>();
+    final selectedTasks = vm.allTasks.where((t) => _selectedTaskIds.contains(t.id)).toList();
+
+    final pauseTasks = selectedTasks.where((t) =>
+        t.status == DownloadStatus.downloading || t.status == DownloadStatus.queued).toList();
+    final resumeTasks = selectedTasks.where((t) => t.status == DownloadStatus.paused).toList();
+    final retryTasks = selectedTasks.where((t) =>
+        t.status == DownloadStatus.failed || t.status == DownloadStatus.cancelled).toList();
+    final completedTasks = selectedTasks.where((t) => t.status == DownloadStatus.completed).toList();
+
+    final canPause = pauseTasks.isNotEmpty;
+    final canResume = resumeTasks.isNotEmpty;
+    final canRetry = retryTasks.isNotEmpty;
+    final canOpenFile = completedTasks.isNotEmpty;
+    final canRename = selectedTasks.length == 1;
+
+    final canChangeLink = selectedTasks.length == 1 &&
+        selectedTasks.first.isResumable &&
+        (selectedTasks.first.status == DownloadStatus.downloading ||
+            selectedTasks.first.status == DownloadStatus.paused ||
+            selectedTasks.first.status == DownloadStatus.queued);
+
+    final canRecheck = selectedTasks.length == 1 &&
+        selectedTasks.first.status == DownloadStatus.completed &&
+        selectedTasks.first.isResumable;
+
+    final canHash = selectedTasks.length == 1 &&
+        selectedTasks.first.status == DownloadStatus.completed;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainer,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(25),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top row with selection count and Clear button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+              child: Row(
+                children: [
+                  Text(
+                    '${selectedTasks.length} selected',
+                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _selectedTaskIds.clear()),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Clear'),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // Actions scrollable row
+            SizedBox(
+              height: 52,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+                children: [
+                  if (canPause) ...[
+                    _buildActionIconButton(
+                      icon: Icons.pause_rounded,
+                      tooltip: 'Pause',
+                      onPressed: () => _pauseSelected(selectedTasks, vm),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canResume) ...[
+                    _buildActionIconButton(
+                      icon: Icons.play_arrow_rounded,
+                      tooltip: 'Resume',
+                      onPressed: () => _resumeSelected(selectedTasks, vm),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canOpenFile) ...[
+                    _buildActionIconButton(
+                      icon: Icons.file_open_outlined,
+                      tooltip: 'Open File',
+                      onPressed: () => _openSelectedFiles(selectedTasks, fileService),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canRename) ...[
+                    _buildActionIconButton(
+                      icon: Icons.edit_outlined,
+                      tooltip: 'Rename',
+                      onPressed: () => _renameSelected(selectedTasks, vm),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canRetry) ...[
+                    _buildActionIconButton(
+                      icon: Icons.replay_rounded,
+                      tooltip: 'Restart',
+                      onPressed: () => _retrySelected(selectedTasks, vm),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canRecheck) ...[
+                    _buildActionIconButton(
+                      icon: Icons.verified_outlined,
+                      tooltip: 'Recheck',
+                      onPressed: () => _recheckSelected(selectedTasks),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canHash) ...[
+                    _buildActionIconButton(
+                      icon: Icons.fingerprint_rounded,
+                      tooltip: 'Hash',
+                      onPressed: () => _hashSelected(selectedTasks),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (canChangeLink) ...[
+                    _buildActionIconButton(
+                      icon: Icons.link_rounded,
+                      tooltip: 'Change Link',
+                      onPressed: () => _openChangeUrlDialog(context, selectedTasks.first, vm),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  _buildActionIconButton(
+                    icon: Icons.copy_rounded,
+                    tooltip: 'Copy Link',
+                    onPressed: () => _copySelectedUrls(selectedTasks),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionIconButton(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: 'Remove',
+                    onPressed: () => _removeSelectedFromList(selectedTasks, vm),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildActionIconButton(
+                    icon: Icons.delete_forever_rounded,
+                    tooltip: 'Delete',
+                    color: theme.colorScheme.error,
+                    onPressed: () => _deleteSelectedFromDisk(context, selectedTasks),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -894,6 +958,7 @@ class _HomePageState extends State<HomePage> {
     required bool canResume,
     required bool canRetry,
     required bool canOpenFile,
+    required bool canRename,
     required bool canChangeLink,
     required bool canRecheck,
     required bool canHash,
@@ -982,6 +1047,12 @@ class _HomePageState extends State<HomePage> {
                     icon: Icons.file_open_outlined,
                     tooltip: 'Open File',
                     onPressed: canOpenFile ? () => _openSelectedFiles(selectedTasks, fileService) : null,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionIconButton(
+                    icon: Icons.edit_outlined,
+                    tooltip: 'Rename File',
+                    onPressed: canRename ? () => _renameSelected(selectedTasks, vm) : null,
                   ),
                   const SizedBox(width: 6),
                   _buildActionIconButton(

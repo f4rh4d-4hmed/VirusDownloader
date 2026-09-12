@@ -219,6 +219,9 @@ class DownloadsViewModel extends ChangeNotifier {
   Future<void> remove(String id, {bool deleteFile = false}) =>
       repository.removeTask(id, deleteFileOnDisk: deleteFile);
 
+  Future<void> rename(String id, String newName) =>
+      repository.renameTask(id, newName);
+
   Future<void> pauseAll() => repository.pauseAll();
   Future<void> resumeAll() => repository.resumeAll();
   Future<void> cancelAllActive() => repository.cancelAllActive();

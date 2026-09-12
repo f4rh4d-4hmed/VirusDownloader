@@ -20,7 +20,7 @@ class AppDropdownItem<T> {
 /// A modern, animated dropdown component with smooth scale/fade transitions,
 /// intelligent upward/downward boundary positioning, and polished visuals.
 class AppAnimatedDropdown<T> extends StatefulWidget {
-  final T value;
+  final T? value;
   final List<AppDropdownItem<T>> items;
   final ValueChanged<T?>? onChanged;
   final bool isDense;
@@ -28,6 +28,7 @@ class AppAnimatedDropdown<T> extends StatefulWidget {
   final double? menuWidth;
   final String? tooltip;
   final EdgeInsetsGeometry? contentPadding;
+  final String? placeholderLabel;
 
   const AppAnimatedDropdown({
     super.key,
@@ -39,6 +40,7 @@ class AppAnimatedDropdown<T> extends StatefulWidget {
     this.menuWidth,
     this.tooltip,
     this.contentPadding,
+    this.placeholderLabel,
   });
 
   @override
@@ -318,10 +320,17 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selectedItem = widget.items.firstWhere(
-      (i) => i.value == widget.value,
-      orElse: () => widget.items.first,
-    );
+    
+    AppDropdownItem<T>? selectedItem;
+    if (widget.value != null) {
+      try {
+        selectedItem = widget.items.firstWhere((i) => i.value == widget.value);
+      } catch (_) {}
+    }
+    
+    if (selectedItem == null && widget.placeholderLabel == null && widget.items.isNotEmpty) {
+      selectedItem = widget.items.first;
+    }
 
     final isDense = widget.isDense;
 
@@ -354,11 +363,11 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
             mainAxisSize: widget.width != null ? MainAxisSize.max : MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (selectedItem.icon != null) ...[
+              if (selectedItem?.icon != null) ...[
                 IconTheme(
                   data: IconThemeData(
                     size: isDense ? 14 : 16,
-                    color: selectedItem.accentColor ?? theme.colorScheme.onSurfaceVariant,
+                    color: selectedItem!.accentColor ?? theme.colorScheme.onSurfaceVariant,
                   ),
                   child: selectedItem.icon!,
                 ),
@@ -367,26 +376,26 @@ class _AppAnimatedDropdownState<T> extends State<AppAnimatedDropdown<T>>
               widget.width != null
                   ? Expanded(
                       child: Text(
-                        selectedItem.label,
+                        selectedItem?.label ?? widget.placeholderLabel ?? '',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: (isDense
                                 ? theme.textTheme.bodySmall
                                 : theme.textTheme.bodyMedium)
                             ?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: theme.colorScheme.onSurface,
+                          fontWeight: selectedItem != null ? FontWeight.w500 : FontWeight.normal,
+                          color: selectedItem != null ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     )
                   : Text(
-                      selectedItem.label,
+                      selectedItem?.label ?? widget.placeholderLabel ?? '',
                       style: (isDense
                               ? theme.textTheme.bodySmall
                               : theme.textTheme.bodyMedium)
                           ?.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurface,
+                        fontWeight: selectedItem != null ? FontWeight.w500 : FontWeight.normal,
+                        color: selectedItem != null ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
               SizedBox(width: isDense ? 4 : 6),

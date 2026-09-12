@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../../core/constants.dart';
@@ -29,6 +31,7 @@ class DownloadRepository extends ChangeNotifier {
   List<DownloadTask> _tasks = [];
   final Map<String, CancelToken> _activeTokens = {};
   final Uuid _uuid = const Uuid();
+  Timer? _fileCheckTimer;
 
   DownloadRepository({
     required this.httpService,
@@ -75,17 +78,65 @@ class DownloadRepository extends ChangeNotifier {
     _tasks = await storageService.loadTasks();
     bool needsPersist = false;
     for (int i = 0; i < _tasks.length; i++) {
-      final task = _tasks[i];
+      var task = _tasks[i];
+      
       final extCat = AppUtils.categoryFromExtension(task.fileName);
       if (extCat != DownloadCategory.other && extCat != task.category) {
-        _tasks[i] = task.copyWith(category: extCat);
+        task = task.copyWith(category: extCat);
         needsPersist = true;
+      }
+
+      final actualFileName = p.basename(task.savePath);
+      if (actualFileName != task.fileName) {
+        task = task.copyWith(fileName: actualFileName);
+        needsPersist = true;
+      }
+
+      if (task != _tasks[i]) {
+        _tasks[i] = task;
       }
     }
     if (needsPersist) {
       _persistTasks();
     }
+    
+    startPeriodicFileCheck();
     notifyListeners();
+  }
+
+  void startPeriodicFileCheck({Duration interval = const Duration(minutes: 5)}) {
+    _checkFileStatuses();
+    _fileCheckTimer?.cancel();
+    _fileCheckTimer = Timer.periodic(interval, (_) => _checkFileStatuses());
+  }
+
+  void stopPeriodicFileCheck() {
+    _fileCheckTimer?.cancel();
+    _fileCheckTimer = null;
+  }
+
+  Future<void> _checkFileStatuses() async {
+    bool hasChanges = false;
+    
+    for (int i = 0; i < _tasks.length; i++) {
+      final task = _tasks[i];
+      if (task.status == DownloadStatus.completed) {
+        final exists = File(task.savePath).existsSync();
+        
+        if (!exists && !task.fileMissing) {
+          _tasks[i] = task.copyWith(fileMissing: true);
+          hasChanges = true;
+        } else if (exists && task.fileMissing) {
+          _tasks[i] = task.copyWith(fileMissing: false);
+          hasChanges = true;
+        }
+      }
+    }
+    
+    if (hasChanges) {
+      _persistTasks();
+      notifyListeners();
+    }
   }
 
   /// Adds a new download task and queues it for execution
@@ -116,6 +167,7 @@ class DownloadRepository extends ChangeNotifier {
 
     final uniqueSavePath =
         await fileService.generateUniqueFilePath(targetDirectory, resolvedFileName);
+    final actualFileName = p.basename(uniqueSavePath);
     final extCategory = AppUtils.categoryFromExtension(resolvedFileName);
     final detectedCategory = isStream
         ? DownloadCategory.videos
@@ -126,7 +178,7 @@ class DownloadRepository extends ChangeNotifier {
     final task = DownloadTask(
       id: _uuid.v4(),
       url: url.trim(),
-      fileName: resolvedFileName,
+      fileName: actualFileName,
       savePath: uniqueSavePath,
       totalBytes: 0,
       downloadedBytes: 0,
@@ -341,6 +393,36 @@ class DownloadRepository extends ChangeNotifier {
     _persistTasks();
     notifyListeners();
     _processQueue();
+  }
+
+  /// Renames a download task and its file
+  Future<void> renameTask(String id, String newFileName) async {
+    if (newFileName.trim().isEmpty) return;
+    
+    final index = _tasks.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    
+    var task = _tasks[index];
+    
+    if (task.status == DownloadStatus.completed) {
+      final newSavePath = await fileService.renameFile(task.savePath, newFileName);
+      if (newSavePath != null) {
+        _tasks[index] = task.copyWith(
+          fileName: newFileName,
+          savePath: newSavePath,
+        );
+      }
+    } else {
+      final dir = p.dirname(task.savePath);
+      final uniquePath = await fileService.generateUniqueFilePath(dir, newFileName);
+      _tasks[index] = task.copyWith(
+        fileName: p.basename(uniquePath),
+        savePath: uniquePath,
+      );
+    }
+    
+    _persistTasks();
+    notifyListeners();
   }
 
   /// Pauses all currently active and queued downloads
@@ -650,13 +732,17 @@ class DownloadRepository extends ChangeNotifier {
       final completedIndex = _tasks.indexWhere((t) => t.id == taskId);
       if (completedIndex != -1 && !cancelToken.isCancelled) {
         final current = _tasks[completedIndex];
-        final finalSize = await fileService.getFileSize(current.savePath);
+        final verifiedPath = await fileService.verifySavedFileLocation(current.savePath);
+        final finalSavePath = verifiedPath ?? current.savePath;
+        final finalSize = await fileService.getFileSize(finalSavePath);
         _tasks[completedIndex] = current.copyWith(
+          savePath: finalSavePath,
           status: DownloadStatus.completed,
           downloadedBytes: finalSize > 0 ? finalSize : current.downloadedBytes,
           totalBytes: finalSize > 0 ? finalSize : current.totalBytes,
           speedBytesPerSec: 0.0,
           dateCompleted: DateTime.now(),
+          fileMissing: verifiedPath == null,
         );
         _persistTasks();
         notifyListeners();

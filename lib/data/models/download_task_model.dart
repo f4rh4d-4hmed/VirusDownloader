@@ -22,6 +22,7 @@ class DownloadTaskModel {
       'isResumable': task.isResumable,
       'fileHash': task.fileHash,
       'hashAlgorithm': task.hashAlgorithm?.name,
+      'fileMissing': task.fileMissing,
     };
   }
 
@@ -74,6 +75,7 @@ class DownloadTaskModel {
       isResumable: json['isResumable'] as bool? ?? true,
       fileHash: json['fileHash'] as String?,
       hashAlgorithm: hashAlgo,
+      fileMissing: json['fileMissing'] as bool? ?? false,
     );
   }
 }

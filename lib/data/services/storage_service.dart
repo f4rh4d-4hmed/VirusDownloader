@@ -84,6 +84,8 @@ class StorageService {
         speedLimitMode: speedLimitMode,
         proxyServers: proxyServers,
         autoRecheckOnComplete: data['autoRecheckOnComplete'] as bool? ?? false,
+        runInBackground: data['runInBackground'] as bool? ?? false,
+        autoStartOnBoot: data['autoStartOnBoot'] as bool? ?? false,
       );
     } catch (_) {
       return const AppSettings();
@@ -103,6 +105,8 @@ class StorageService {
       'speedLimitMode': settings.speedLimitMode.index,
       'proxyServers': settings.proxyServers.map((p) => p.toJson()).toList(),
       'autoRecheckOnComplete': settings.autoRecheckOnComplete,
+      'runInBackground': settings.runInBackground,
+      'autoStartOnBoot': settings.autoStartOnBoot,
     };
     await prefs.setString(AppConstants.storageKeySettings, jsonEncode(data));
   }

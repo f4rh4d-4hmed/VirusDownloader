@@ -12,6 +12,8 @@ class AppSettings {
   final SpeedLimitMode speedLimitMode;
   final List<ProxyConfig> proxyServers;
   final bool autoRecheckOnComplete;
+  final bool runInBackground;
+  final bool autoStartOnBoot;
 
   const AppSettings({
     this.defaultSavePath = '',
@@ -23,6 +25,8 @@ class AppSettings {
     this.speedLimitMode = SpeedLimitMode.unlimited,
     this.proxyServers = const [],
     this.autoRecheckOnComplete = false,
+    this.runInBackground = false,
+    this.autoStartOnBoot = false,
   });
 
   AppSettings copyWith({
@@ -35,6 +39,8 @@ class AppSettings {
     SpeedLimitMode? speedLimitMode,
     List<ProxyConfig>? proxyServers,
     bool? autoRecheckOnComplete,
+    bool? runInBackground,
+    bool? autoStartOnBoot,
   }) {
     return AppSettings(
       defaultSavePath: defaultSavePath ?? this.defaultSavePath,
@@ -46,6 +52,8 @@ class AppSettings {
       speedLimitMode: speedLimitMode ?? this.speedLimitMode,
       proxyServers: proxyServers ?? this.proxyServers,
       autoRecheckOnComplete: autoRecheckOnComplete ?? this.autoRecheckOnComplete,
+      runInBackground: runInBackground ?? this.runInBackground,
+      autoStartOnBoot: autoStartOnBoot ?? this.autoStartOnBoot,
     );
   }
 }

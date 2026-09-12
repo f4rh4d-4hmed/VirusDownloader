@@ -55,6 +55,16 @@ function extractFileName(url, defaultName = 'download.mp4') {
   return defaultName;
 }
 
+// Extract extension from URL, stripping query params
+function extractExtFromUrl(url) {
+  try {
+    const cleanUrl = url.split('?')[0].split('#')[0];
+    const match = cleanUrl.match(/\.([a-z0-9]+)$/i);
+    if (match) return '.' + match[1].toLowerCase();
+  } catch (_) {}
+  return '';
+}
+
 // Determine media category matching VirusDownloader enums
 function getMediaCategory(url, mime = '', filename = '') {
   const target = (filename || '').trim() || (url || '').trim();
@@ -236,9 +246,16 @@ chrome.webRequest.onResponseStarted.addListener(
     }
     delete cachedHeaders['range'];
     delete cachedHeaders['Range'];
-
-    const fileName = extractFileName(cleanedUrl, `${tabTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`);
     const category = getMediaCategory(cleanedUrl, mimeType);
+    let fileName;
+    const isMediaCategory = (category === 'videos' || category === 'audio');
+    if (isMediaCategory && tabTitle && tabTitle !== 'Web Video') {
+      const cleanTitle = tabTitle.replace(/[\\/:*?"<>|]/g, '_').trim();
+      const ext = extractExtFromUrl(cleanedUrl) || '.mp4';
+      fileName = cleanTitle + ext;
+    } else {
+      fileName = extractFileName(cleanedUrl, `${tabTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`);
+    }
 
     const mediaItem = {
       id: `${details.tabId}_${cleanedUrl.substring(0, 100)}_${Date.now()}`,
